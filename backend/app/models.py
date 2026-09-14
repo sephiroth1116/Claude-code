@@ -22,6 +22,7 @@ class Listing:
     distance_miles: float | None = None
     score: float = 0.0
     score_reasons: list[str] | None = None
+    matched_bike: str | None = None  # name of the bike this listing scored best against
     status: str = "new"  # "new" | "reviewed" | "false_positive" | "contacted_police"
 
     def to_dict(self) -> dict:

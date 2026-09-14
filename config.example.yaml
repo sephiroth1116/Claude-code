@@ -1,17 +1,26 @@
-# Copy this file to config.yaml and fill in your bike's details.
+# Copy this file to config.yaml and fill in your bike(s)' details.
 # config.yaml is gitignored so your personal info never gets committed.
 
-bike:
-  make: ""              # e.g. "Trek"
-  model: ""              # e.g. "FX 3 Disc"
-  year: ""                # e.g. "2021" (optional)
-  color: ""               # e.g. "matte black with orange accents"
-  frame_size: ""          # e.g. "M" or "54cm"
-  features:                # distinguishing details, one per line
-    - ""                    # e.g. "sticker of a skull on top tube"
-    - ""                    # e.g. "scratch on left crank arm"
-  stolen_date: ""          # YYYY-MM-DD, used to ignore listings posted before this
-  approx_value_usd: null    # what it's worth; used to flag suspiciously cheap listings
+bikes:
+  - name: "Bike 1"          # short label shown in the dashboard, e.g. "Gazelle"
+    make: ""                 # e.g. "Trek"
+    model: ""                 # e.g. "FX 3 Disc"
+    year: ""                   # e.g. "2021" (optional)
+    color: ""                  # e.g. "matte black with orange accents"
+    frame_size: ""             # e.g. "M" or "54cm"
+    serial_number: ""           # from the frame sticker -- sellers rarely list it, but
+                                  # it's worth having on record for the police report either way
+    features:                    # distinguishing details, one per line
+      - ""                        # e.g. "sticker of a skull on top tube"
+      - ""                        # e.g. "scratch on left crank arm"
+    stolen_date: ""             # YYYY-MM-DD, used to ignore listings posted before this
+    approx_value_usd: null       # what it's worth; used to flag suspiciously cheap listings
+
+  # Add more bikes by copying the block above -- every listing gets scored against
+  # all of them and tagged with whichever one it matched best.
+  # - name: "Bike 2"
+  #   make: ""
+  #   ...
 
 search:
   # Either give a city name Craigslist recognizes as a subdomain (see sources.craigslist.site

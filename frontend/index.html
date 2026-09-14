@@ -34,7 +34,8 @@
     margin-bottom: 20px;
   }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  .bike-summary { color: var(--muted); font-size: 0.9rem; }
+  .bike-list { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 0.9rem; }
+  .radius-line { margin-top: 4px; }
   .sources { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .badge {
     font-size: 0.72rem;
@@ -89,6 +90,7 @@
   .card-title a { color: var(--text); text-decoration: none; }
   .card-title a:hover { text-decoration: underline; }
   .meta-row { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); }
+  .score-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .score {
     display: inline-block;
     font-size: 0.75rem;
@@ -97,7 +99,14 @@
     border-radius: 999px;
     background: var(--accent-soft);
     color: var(--accent);
-    align-self: flex-start;
+  }
+  .matched-bike {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--good-soft);
+    color: var(--good);
   }
   .reasons { font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 16px; }
   .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
@@ -111,7 +120,7 @@
   <header>
     <div>
       <h1>Stolen Bike Finder</h1>
-      <div class="bike-summary" id="bike-summary">Loading bike details&hellip;</div>
+      <div class="bike-list" id="bike-list">Loading bike details&hellip;</div>
       <div class="sources" id="sources"></div>
     </div>
     <button class="primary" id="refresh-btn">Refresh listings</button>
@@ -137,6 +146,11 @@
         <option value="contacted_police">Contacted police</option>
       </select>
     </label>
+    <label>Bike
+      <select id="bike-filter">
+        <option value="">All bikes</option>
+      </select>
+    </label>
     <span id="result-count" style="color: var(--muted)"></span>
   </div>
 
@@ -146,7 +160,7 @@
 
 <script>
 const API = {
-  bike: '/api/bike',
+  bikes: '/api/bikes',
   listings: '/api/listings',
   refresh: '/api/refresh',
   status: (id) => `/api/listings/${encodeURIComponent(id)}/status`,
@@ -154,18 +168,42 @@ const API = {
 
 let allListings = [];
 
-async function loadBike() {
-  const res = await fetch(API.bike);
-  const bike = await res.json();
-  const parts = [bike.year, bike.make, bike.model].filter(Boolean).join(' ');
-  document.getElementById('bike-summary').textContent =
-    (parts || 'No bike configured yet') +
-    (bike.color ? ` · ${bike.color}` : '') +
-    ` · within ${bike.radius_miles} mi`;
+async function loadBikes() {
+  const res = await fetch(API.bikes);
+  const data = await res.json();
+  const bikes = data.bikes || [];
+
+  const listEl = document.getElementById('bike-list');
+  listEl.innerHTML = '';
+  if (!bikes.length) {
+    listEl.textContent = 'No bikes configured yet';
+  } else {
+    for (const b of bikes) {
+      const line = document.createElement('div');
+      const parts = [b.year, b.make, b.model].filter(Boolean).join(' ');
+      line.textContent = `${b.name}: ${parts || '(no make/model set)'}${b.color ? ' · ' + b.color : ''}`;
+      listEl.appendChild(line);
+    }
+    const radiusLine = document.createElement('div');
+    radiusLine.className = 'radius-line';
+    radiusLine.textContent = `Searching within ${data.radius_miles} mi`;
+    listEl.appendChild(radiusLine);
+  }
+
+  const bikeFilter = document.getElementById('bike-filter');
+  const currentValue = bikeFilter.value;
+  bikeFilter.innerHTML = '<option value="">All bikes</option>';
+  for (const b of bikes) {
+    const opt = document.createElement('option');
+    opt.value = b.name;
+    opt.textContent = b.name;
+    bikeFilter.appendChild(opt);
+  }
+  bikeFilter.value = currentValue;
 
   const sourcesEl = document.getElementById('sources');
   sourcesEl.innerHTML = '';
-  for (const [name, enabled] of Object.entries(bike.sources || {})) {
+  for (const [name, enabled] of Object.entries(data.sources || {})) {
     const span = document.createElement('span');
     span.className = 'badge' + (enabled ? ' on' : '');
     span.textContent = name;
@@ -173,9 +211,9 @@ async function loadBike() {
   }
 
   const banner = document.getElementById('error-banner');
-  if (bike.last_refresh_error) {
+  if (data.last_refresh_error) {
     banner.style.display = 'block';
-    banner.textContent = 'Last refresh had errors: ' + bike.last_refresh_error;
+    banner.textContent = 'Last refresh had errors: ' + data.last_refresh_error;
   } else {
     banner.style.display = 'none';
   }
@@ -190,11 +228,14 @@ async function loadListings() {
 
 function render() {
   const statusFilter = document.getElementById('status-filter').value;
+  const bikeFilter = document.getElementById('bike-filter').value;
   const grid = document.getElementById('grid');
   const emptyState = document.getElementById('empty-state');
   grid.innerHTML = '';
 
-  const filtered = allListings.filter((l) => !statusFilter || l.status === statusFilter);
+  const filtered = allListings.filter(
+    (l) => (!statusFilter || l.status === statusFilter) && (!bikeFilter || l.matched_bike === bikeFilter)
+  );
   document.getElementById('result-count').textContent = `${filtered.length} listing(s)`;
   emptyState.style.display = filtered.length ? 'none' : 'block';
 
@@ -223,10 +264,19 @@ function renderCard(listing) {
   const body = document.createElement('div');
   body.className = 'card-body';
 
+  const scoreRow = document.createElement('div');
+  scoreRow.className = 'score-row';
   const score = document.createElement('span');
   score.className = 'score';
   score.textContent = `score ${listing.score}`;
-  body.appendChild(score);
+  scoreRow.appendChild(score);
+  if (listing.matched_bike) {
+    const bikeTag = document.createElement('span');
+    bikeTag.className = 'matched-bike';
+    bikeTag.textContent = listing.matched_bike;
+    scoreRow.appendChild(bikeTag);
+  }
+  body.appendChild(scoreRow);
 
   const title = document.createElement('div');
   title.className = 'card-title';
@@ -294,14 +344,15 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Refresh listings';
-    await Promise.all([loadBike(), loadListings()]);
+    await Promise.all([loadBikes(), loadListings()]);
   }
 });
 
 document.getElementById('min-score').addEventListener('change', loadListings);
 document.getElementById('status-filter').addEventListener('change', render);
+document.getElementById('bike-filter').addEventListener('change', render);
 
-loadBike();
+loadBikes();
 loadListings();
 </script>
 </body>

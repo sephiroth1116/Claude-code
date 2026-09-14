@@ -1,10 +1,20 @@
-"""Craigslist search via its public RSS feed -- no auth, no API key, and it's the one
-source here that officially supports being queried this way (Craigslist has historically
-tolerated reasonable RSS polling; keep request volume low and cache results).
+"""Craigslist search scraper.
+
+Craigslist discontinued RSS feeds for search results (format=rss now 404s), so this
+parses the plain HTML search page instead -- specifically its no-JS "static" result
+list (<li class="cl-static-search-result">), which is server-rendered and doesn't need
+a browser. Confirmed against a live search: lat/lon + search_distance query params still
+do server-side radius filtering on this endpoint, same as the old RSS one did.
+
+This does NOT get per-listing images, exact geo-coordinates, or posted dates -- none of
+that is in the static result list, and fetching each listing's own page to get them would
+multiply request volume by however many results come back. distance_miles and posted_at
+are left unset for Craigslist results; the radius restriction still happens server-side
+via the lat/lon/search_distance params below, and results come back sorted newest-first.
 """
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 from typing import Iterable
 
 import requests
@@ -12,8 +22,53 @@ import requests
 from ..config import CraigslistConfig, SearchArea
 from ..models import Listing, now_iso
 
-_GEORSS_NS = "{http://www.georss.org/georss}"
-_USER_AGENT = "stolen-bike-finder/1.0 (personal use, low volume)"
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+class _ResultListParser(HTMLParser):
+    """Pulls title/url/price/location out of Craigslist's static result <li> markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.items: list[dict] = []
+        self._current: dict | None = None
+        self._capture_field: str | None = None  # "price" | "location" | None
+        self._seen_link_in_current = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs_d = dict(attrs)
+        if tag == "li" and "cl-static-search-result" in (attrs_d.get("class") or ""):
+            self._current = {"title": attrs_d.get("title", ""), "url": "", "price": "", "location": ""}
+            self._seen_link_in_current = False
+            return
+
+        if self._current is None:
+            return
+
+        if tag == "a" and not self._seen_link_in_current and attrs_d.get("href"):
+            self._current["url"] = attrs_d["href"]
+            self._seen_link_in_current = True
+        elif tag == "div":
+            cls = attrs_d.get("class") or ""
+            if "price" in cls:
+                self._capture_field = "price"
+            elif "location" in cls:
+                self._capture_field = "location"
+
+    def handle_data(self, data):
+        if self._current is not None and self._capture_field:
+            self._current[self._capture_field] += data.strip()
+
+    def handle_endtag(self, tag):
+        if tag == "div":
+            self._capture_field = None
+        elif tag == "li" and self._current is not None:
+            if self._current["url"]:
+                self.items.append(self._current)
+            self._current = None
 
 
 class CraigslistScraper:
@@ -28,11 +83,7 @@ class CraigslistScraper:
             return []
 
         url = f"https://{self.config.site}.craigslist.org/search/{self.config.category}"
-        params = {
-            "format": "rss",
-            "query": query,
-            "sort": "date",
-        }
+        params = {"query": query, "sort": "date"}
         if self.search_area.lat is not None and self.search_area.lon is not None:
             params["lat"] = self.search_area.lat
             params["lon"] = self.search_area.lon
@@ -41,64 +92,37 @@ class CraigslistScraper:
         resp = requests.get(url, params=params, headers={"User-Agent": _USER_AGENT}, timeout=15)
         resp.raise_for_status()
 
-        return list(self._parse_rss(resp.text))
+        return list(self._parse_html(resp.text))
 
-    def _parse_rss(self, rss_text: str) -> Iterable[Listing]:
-        root = ET.fromstring(rss_text)
-        channel = root.find("channel")
-        if channel is None:
-            return
+    def _parse_html(self, html_text: str) -> Iterable[Listing]:
+        parser = _ResultListParser()
+        parser.feed(html_text)
 
-        for item in channel.findall("item"):
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            pub_date = item.findtext("pubDate")
-
-            if not link:
+        for item in parser.items:
+            url = item["url"]
+            external_id = url.rstrip("/").rsplit("/", 1)[-1]
+            if not external_id:
                 continue
-
-            external_id = link.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
-            price = _extract_price(title)
-
-            point = item.find(f"{_GEORSS_NS}point")
-            lat = lon = None
-            if point is not None and point.text:
-                parts = point.text.strip().split()
-                if len(parts) == 2:
-                    lat, lon = float(parts[0]), float(parts[1])
-
-            image_url = None
-            enclosure = item.find("enclosure")
-            if enclosure is not None:
-                image_url = enclosure.get("url")
 
             yield Listing(
                 id=f"craigslist:{external_id}",
                 source="craigslist",
-                title=title,
-                description=description,
-                price_usd=price,
-                url=link,
-                image_url=image_url,
-                location_text=self.config.site,
-                lat=lat,
-                lon=lon,
-                posted_at=pub_date,
+                title=item["title"],
+                description="",
+                price_usd=_extract_price(item["price"]),
+                url=url,
+                image_url=None,
+                location_text=item["location"] or self.config.site,
+                lat=None,
+                lon=None,
+                posted_at=None,
                 first_seen_at=now_iso(),
             )
 
 
-def _extract_price(title: str) -> float | None:
-    # Craigslist RSS titles are usually "$350 - Trek FX 3 Disc (City)"
-    if not title.startswith("$"):
+def _extract_price(text: str) -> float | None:
+    digits = "".join(ch for ch in text if ch.isdigit() or ch == ".")
+    try:
+        return float(digits) if digits else None
+    except ValueError:
         return None
-    digits = ""
-    for ch in title[1:]:
-        if ch.isdigit():
-            digits += ch
-        elif ch in (",", "."):
-            continue
-        else:
-            break
-    return float(digits) if digits else None

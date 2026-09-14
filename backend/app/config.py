@@ -16,11 +16,13 @@ CONFIG_PATH = Path(os.environ.get("BIKE_FINDER_CONFIG", REPO_ROOT / "config.yaml
 
 @dataclass
 class BikeInfo:
+    name: str = ""  # short label for this bike, e.g. "Gazelle" -- shown in the dashboard
     make: str = ""
     model: str = ""
     year: str = ""
     color: str = ""
     frame_size: str = ""
+    serial_number: str = ""
     features: list[str] = field(default_factory=list)
     stolen_date: str | None = None
     approx_value_usd: float | None = None
@@ -38,7 +40,7 @@ class SearchArea:
 class CraigslistConfig:
     enabled: bool = True
     site: str = ""
-    category: str = "bika"
+    category: str = "bia"  # bicycles for sale
 
 
 @dataclass
@@ -59,7 +61,7 @@ class EmailAlertConfig:
 
 @dataclass
 class AppConfig:
-    bike: BikeInfo
+    bikes: list[BikeInfo]
     search: SearchArea
     craigslist: CraigslistConfig
     ebay: EbayConfig
@@ -85,17 +87,24 @@ def load_config() -> AppConfig:
 
     raw = yaml.safe_load(CONFIG_PATH.read_text()) or {}
 
-    bike_raw = raw.get("bike", {})
-    bike = BikeInfo(
-        make=bike_raw.get("make", ""),
-        model=bike_raw.get("model", ""),
-        year=str(bike_raw.get("year", "") or ""),
-        color=bike_raw.get("color", ""),
-        frame_size=bike_raw.get("frame_size", ""),
-        features=[f for f in bike_raw.get("features", []) if f],
-        stolen_date=bike_raw.get("stolen_date") or None,
-        approx_value_usd=bike_raw.get("approx_value_usd"),
-    )
+    bikes_raw = raw.get("bikes")
+    if bikes_raw is None and raw.get("bike"):
+        bikes_raw = [raw["bike"]]  # back-compat with the single-bike config shape
+    bikes = [
+        BikeInfo(
+            name=b.get("name") or b.get("make", "") or f"bike {i + 1}",
+            make=b.get("make", ""),
+            model=b.get("model", ""),
+            year=str(b.get("year", "") or ""),
+            color=b.get("color", ""),
+            frame_size=b.get("frame_size", ""),
+            serial_number=b.get("serial_number", ""),
+            features=[f for f in b.get("features", []) if f],
+            stolen_date=b.get("stolen_date") or None,
+            approx_value_usd=b.get("approx_value_usd"),
+        )
+        for i, b in enumerate(bikes_raw or [])
+    ]
 
     search_raw = raw.get("search", {})
     search = SearchArea(
@@ -116,7 +125,7 @@ def load_config() -> AppConfig:
     email_alert = EmailAlertConfig(enabled=alerts_raw.get("enabled", False), to=alerts_raw.get("to", ""))
 
     return AppConfig(
-        bike=bike,
+        bikes=bikes,
         search=search,
         craigslist=craigslist,
         ebay=ebay,

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS listings (
     distance_miles REAL,
     score REAL NOT NULL DEFAULT 0,
     score_reasons TEXT,
+    matched_bike TEXT,
     status TEXT NOT NULL DEFAULT 'new'
 );
 """
@@ -57,9 +58,15 @@ def upsert_listing(listing: Listing) -> bool:
         existing = conn.execute("SELECT id, status FROM listings WHERE id = ?", (listing.id,)).fetchone()
         if existing:
             conn.execute(
-                """UPDATE listings SET score = ?, score_reasons = ?, distance_miles = ?
+                """UPDATE listings SET score = ?, score_reasons = ?, distance_miles = ?, matched_bike = ?
                    WHERE id = ?""",
-                (listing.score, json.dumps(listing.score_reasons or []), listing.distance_miles, listing.id),
+                (
+                    listing.score,
+                    json.dumps(listing.score_reasons or []),
+                    listing.distance_miles,
+                    listing.matched_bike,
+                    listing.id,
+                ),
             )
             conn.commit()
             return False
@@ -67,8 +74,9 @@ def upsert_listing(listing: Listing) -> bool:
         conn.execute(
             """INSERT INTO listings (
                 id, source, title, description, price_usd, url, image_url, location_text,
-                lat, lon, posted_at, first_seen_at, distance_miles, score, score_reasons, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                lat, lon, posted_at, first_seen_at, distance_miles, score, score_reasons,
+                matched_bike, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 listing.id,
                 listing.source,
@@ -85,6 +93,7 @@ def upsert_listing(listing: Listing) -> bool:
                 listing.distance_miles,
                 listing.score,
                 json.dumps(listing.score_reasons or []),
+                listing.matched_bike,
                 listing.status,
             ),
         )

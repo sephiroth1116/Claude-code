@@ -118,6 +118,7 @@ if __name__ == "__main__":
 
     cfg = load_config()
     scraper = FacebookScraper(cfg.facebook, cfg.search.lat, cfg.search.lon, cfg.search.radius_miles)
-    query = " ".join(filter(None, [cfg.bike.make, cfg.bike.model]))
+    first_bike = cfg.bikes[0] if cfg.bikes else None
+    query = " ".join(filter(None, [first_bike.make, first_bike.model])) if first_bike else ""
     for listing in scraper.search(query or "bike", headless=False):
         print(listing.title, listing.price_usd, listing.url)

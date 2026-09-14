@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
-from .config import AppConfig
+from .config import AppConfig, BikeInfo
 from .geo import haversine_miles
 from .models import Listing
 
@@ -23,10 +23,20 @@ _CHEAP_PRICE_WEIGHT = 1.5
 _CHEAP_PRICE_RATIO = 0.4  # priced under 40% of stated value looks suspicious
 
 
-def build_search_query(config: AppConfig) -> str:
-    parts = [config.bike.make, config.bike.model]
-    parts.extend(config.search.extra_keywords)
-    return " ".join(p for p in parts if p).strip()
+def build_search_queries(config: AppConfig) -> list[str]:
+    """One query per bike -- just the make (falling back to model).
+
+    Craigslist (and most of these search boxes) AND-match every word in the query, so a
+    query combining make + model + extra keywords almost never matches anything real --
+    sellers don't type a bike's full name out. Cast a wide net with just the make and let
+    score_listing() do the actual narrowing across the results that come back.
+    """
+    queries = []
+    for bike in config.bikes:
+        query = (bike.make or bike.model).strip()
+        if query:
+            queries.append(query)
+    return queries
 
 
 def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool:
@@ -47,13 +57,18 @@ def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool
     return False
 
 
-def score_listing(listing: Listing, config: AppConfig) -> None:
-    """Mutates listing.score and listing.score_reasons in place."""
-    bike = config.bike
+_SERIAL_WEIGHT = 10.0  # sellers almost never type serials, but if it's there, that's it
+
+
+def _score_against_bike(listing: Listing, bike: BikeInfo, config: AppConfig) -> tuple[float, list[str]]:
     text = f"{listing.title} {listing.description}".strip()
 
     score = 0.0
     reasons: list[str] = []
+
+    if bike.serial_number and _fuzzy_contains(text, bike.serial_number, threshold=0.95):
+        score += _SERIAL_WEIGHT
+        reasons.append(f"mentions serial number '{bike.serial_number}'")
 
     if bike.make and _fuzzy_contains(text, bike.make):
         score += _MAKE_WEIGHT
@@ -86,8 +101,23 @@ def score_listing(listing: Listing, config: AppConfig) -> None:
             score += _CHEAP_PRICE_WEIGHT
             reasons.append("priced suspiciously low for this bike's value")
 
-    listing.score = round(score, 2)
-    listing.score_reasons = reasons
+    return round(score, 2), reasons
+
+
+def score_listing(listing: Listing, config: AppConfig) -> None:
+    """Scores against every configured bike and keeps the best match in place."""
+    best_score = 0.0
+    best_reasons: list[str] = []
+    best_bike: BikeInfo | None = None
+
+    for bike in config.bikes:
+        score, reasons = _score_against_bike(listing, bike, config)
+        if score > best_score:
+            best_score, best_reasons, best_bike = score, reasons, bike
+
+    listing.score = best_score
+    listing.score_reasons = best_reasons
+    listing.matched_bike = best_bike.name if best_bike else None
 
 
 def compute_distance(listing: Listing, config: AppConfig) -> None:
@@ -101,10 +131,14 @@ def compute_distance(listing: Listing, config: AppConfig) -> None:
 
 
 def is_relevant(listing: Listing, config: AppConfig) -> bool:
-    """Hard filters: posted before the theft, or clearly outside the search radius."""
-    if config.bike.stolen_date and listing.posted_at:
+    """Hard filters: posted before the matched bike's theft, or outside the search radius.
+
+    Call this after score_listing() has set listing.matched_bike.
+    """
+    bike = next((b for b in config.bikes if b.name == listing.matched_bike), None)
+    if bike and bike.stolen_date and listing.posted_at:
         posted = _parse_date(listing.posted_at)
-        stolen = _parse_date(config.bike.stolen_date)
+        stolen = _parse_date(bike.stolen_date)
         if posted and stolen and posted < stolen:
             return False
 

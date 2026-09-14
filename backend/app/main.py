@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from . import db
 from .config import AppConfig, load_config
-from .matching import build_search_query, compute_distance, is_relevant, score_listing
+from .matching import build_search_queries, compute_distance, is_relevant, score_listing
 from .scrapers.craigslist import CraigslistScraper
 from .scrapers.ebay import EbayScraper
 
@@ -57,9 +57,9 @@ async def run_refresh() -> dict:
     global _last_refresh_error
     async with _refresh_lock:
         config = get_config()
-        query = build_search_query(config)
-        if not query:
-            raise RuntimeError("config.yaml has no bike.make/model set yet -- nothing to search for.")
+        queries = build_search_queries(config)
+        if not queries:
+            raise RuntimeError("config.yaml has no bikes with make/model set yet -- nothing to search for.")
 
         new_count = 0
         seen_count = 0
@@ -72,23 +72,29 @@ async def run_refresh() -> dict:
             scrapers.append(EbayScraper(config.ebay, config.ebay_app_id, config.ebay_cert_id))
 
         loop = asyncio.get_event_loop()
+        seen_ids: set[str] = set()
         for scraper in scrapers:
-            try:
-                listings = await loop.run_in_executor(None, scraper.search, query)
-            except Exception as exc:  # keep one bad source from killing the whole refresh
-                logger.exception("Scraper %s failed", scraper.name)
-                errors.append(f"{scraper.name}: {exc}")
-                continue
-
-            for listing in listings:
-                seen_count += 1
-                compute_distance(listing, config)
-                if not is_relevant(listing, config):
+            for query in queries:
+                try:
+                    listings = await loop.run_in_executor(None, scraper.search, query)
+                except Exception as exc:  # keep one bad source/query from killing the whole refresh
+                    logger.exception("Scraper %s failed for query %r", scraper.name, query)
+                    errors.append(f"{scraper.name} ({query}): {exc}")
                     continue
-                score_listing(listing, config)
-                is_new = db.upsert_listing(listing)
-                if is_new:
-                    new_count += 1
+
+                for listing in listings:
+                    if listing.id in seen_ids:
+                        continue  # same listing turned up under more than one bike's query
+                    seen_ids.add(listing.id)
+                    seen_count += 1
+
+                    compute_distance(listing, config)
+                    score_listing(listing, config)
+                    if not is_relevant(listing, config):
+                        continue
+                    is_new = db.upsert_listing(listing)
+                    if is_new:
+                        new_count += 1
 
         _last_refresh_error = "; ".join(errors) if errors else None
         return {"seen": seen_count, "new": new_count, "errors": errors}
@@ -124,17 +130,25 @@ async def update_status(listing_id: str, body: StatusUpdate) -> dict:
     return {"ok": True}
 
 
-@app.get("/api/bike")
-async def get_bike() -> dict:
+@app.get("/api/bikes")
+async def get_bikes() -> dict:
     config = get_config()
     return {
-        "make": config.bike.make,
-        "model": config.bike.model,
-        "year": config.bike.year,
-        "color": config.bike.color,
-        "frame_size": config.bike.frame_size,
-        "features": config.bike.features,
-        "stolen_date": config.bike.stolen_date,
+        "bikes": [
+            {
+                "name": b.name,
+                "make": b.make,
+                "model": b.model,
+                "year": b.year,
+                "color": b.color,
+                "frame_size": b.frame_size,
+                "serial_number": b.serial_number,
+                "features": b.features,
+                "stolen_date": b.stolen_date,
+                "approx_value_usd": b.approx_value_usd,
+            }
+            for b in config.bikes
+        ],
         "radius_miles": config.search.radius_miles,
         "sources": {
             "craigslist": config.craigslist.enabled,
