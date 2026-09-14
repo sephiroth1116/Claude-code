@@ -171,8 +171,7 @@
   </div>
 
   <div class="radius-control">
-    <label for="price-slider">Min price: <strong id="price-value">Any</strong></label>
-    <input type="range" id="price-slider" min="0" max="1000" step="25" value="0" />
+    <label>Min price: <strong id="price-value">Any</strong></label>
     <div class="radius-presets">
       <button type="button" class="price-preset" data-price="100">$100</button>
       <button type="button" class="price-preset" data-price="250">$250</button>
@@ -321,7 +320,6 @@ async function loadListings() {
 function render() {
   const statusFilter = document.getElementById('status-filter').value;
   const bikeFilter = document.getElementById('bike-filter').value;
-  const minPrice = Number(document.getElementById('price-slider').value);
   const grid = document.getElementById('grid');
   const emptyState = document.getElementById('empty-state');
   grid.innerHTML = '';
@@ -330,7 +328,7 @@ function render() {
     (l) =>
       (!statusFilter || l.status === statusFilter) &&
       (!bikeFilter || l.matched_bike === bikeFilter) &&
-      (minPrice <= 0 || (l.price_usd != null && l.price_usd >= minPrice))
+      (minPriceFilter <= 0 || (l.price_usd != null && l.price_usd >= minPriceFilter))
   );
   document.getElementById('result-count').textContent = `${filtered.length} listing(s)`;
   emptyState.style.display = filtered.length ? 'none' : 'block';
@@ -465,6 +463,8 @@ document.querySelectorAll('.radius-presets .preset').forEach((btn) => {
   });
 });
 
+let minPriceFilter = 0;
+
 function priceValueLabel(value) {
   const n = Number(value);
   if (n <= 0) return 'Any';
@@ -472,23 +472,17 @@ function priceValueLabel(value) {
 }
 
 function updatePricePresetActive() {
-  const value = document.getElementById('price-slider').value;
   document.querySelectorAll('.price-preset').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.price === value);
+    btn.classList.toggle('active', Number(btn.dataset.price) === minPriceFilter);
   });
 }
 
-document.getElementById('price-slider').addEventListener('input', (e) => {
-  document.getElementById('price-value').textContent = priceValueLabel(e.target.value);
-  updatePricePresetActive();
-  render();
-});
-
 document.querySelectorAll('.price-preset').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const slider = document.getElementById('price-slider');
-    slider.value = btn.dataset.price;
-    document.getElementById('price-value').textContent = priceValueLabel(btn.dataset.price);
+    const price = Number(btn.dataset.price);
+    // Clicking the already-active preset turns the filter back off.
+    minPriceFilter = minPriceFilter === price ? 0 : price;
+    document.getElementById('price-value').textContent = priceValueLabel(minPriceFilter);
     updatePricePresetActive();
     render();
   });
