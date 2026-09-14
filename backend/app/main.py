@@ -15,6 +15,7 @@ from .config import AppConfig, load_config
 from .matching import build_search_queries, compute_distance, is_relevant, score_listing
 from .scrapers.craigslist import CraigslistScraper, fetch_listing_details
 from .scrapers.ebay import EbayScraper
+from .scrapers.facebook import FacebookScraper
 
 _DETAILS_FETCH_CONCURRENCY = 6  # be polite to Craigslist's servers
 
@@ -71,6 +72,12 @@ async def run_refresh() -> dict:
             scrapers.append(CraigslistScraper(config.craigslist, config.search))
         if config.ebay.enabled:
             scrapers.append(EbayScraper(config.ebay, config.ebay_app_id, config.ebay_cert_id))
+        if config.facebook.enabled:
+            scrapers.append(
+                FacebookScraper(
+                    config.facebook, config.search.lat, config.search.lon, config.search.radius_miles
+                )
+            )
 
         loop = asyncio.get_event_loop()
         seen_ids: set[str] = set()
