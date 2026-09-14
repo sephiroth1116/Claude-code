@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# personal info -- keep out of git
+config.yaml
+.env
+listings.db
+.fb_browser_profile/

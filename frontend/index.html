@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stolen Bike Finder</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --card-bg: #ffffff;
+    --border: #e2e0db;
+    --text: #1f1e1c;
+    --muted: #6b6862;
+    --accent: #b6472e;
+    --accent-soft: #f6e4de;
+    --good: #2f6f4e;
+    --good-soft: #e3f0e8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 24px 16px 64px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .bike-summary { color: var(--muted); font-size: 0.9rem; }
+  .sources { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .badge.on { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    padding: 8px 14px;
+  }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+  select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); }
+  #error-banner {
+    display: none;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card img { width: 100%; height: 160px; object-fit: cover; background: #eee; }
+  .card .no-image { width: 100%; height: 160px; background: #eee; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.8rem; }
+  .card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card-title { font-weight: 600; font-size: 0.95rem; line-height: 1.3; }
+  .card-title a { color: var(--text); text-decoration: none; }
+  .card-title a:hover { text-decoration: underline; }
+  .meta-row { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); }
+  .score {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    align-self: flex-start;
+  }
+  .reasons { font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 16px; }
+  .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
+  .card-actions button { flex: 1; font-size: 0.75rem; padding: 6px 8px; }
+  .card-actions button.active { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+  .empty-state { text-align: center; color: var(--muted); padding: 60px 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Stolen Bike Finder</h1>
+      <div class="bike-summary" id="bike-summary">Loading bike details&hellip;</div>
+      <div class="sources" id="sources"></div>
+    </div>
+    <button class="primary" id="refresh-btn">Refresh listings</button>
+  </header>
+
+  <div id="error-banner"></div>
+
+  <div class="controls">
+    <label>Min score
+      <select id="min-score">
+        <option value="0">Any</option>
+        <option value="2">2+</option>
+        <option value="4" selected>4+</option>
+        <option value="6">6+</option>
+      </select>
+    </label>
+    <label>Status
+      <select id="status-filter">
+        <option value="">All</option>
+        <option value="new" selected>New</option>
+        <option value="reviewed">Reviewed</option>
+        <option value="false_positive">False positive</option>
+        <option value="contacted_police">Contacted police</option>
+      </select>
+    </label>
+    <span id="result-count" style="color: var(--muted)"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty-state" id="empty-state" style="display:none">No listings match these filters yet. Try Refresh, or lower the min score.</div>
+</div>
+
+<script>
+const API = {
+  bike: '/api/bike',
+  listings: '/api/listings',
+  refresh: '/api/refresh',
+  status: (id) => `/api/listings/${encodeURIComponent(id)}/status`,
+};
+
+let allListings = [];
+
+async function loadBike() {
+  const res = await fetch(API.bike);
+  const bike = await res.json();
+  const parts = [bike.year, bike.make, bike.model].filter(Boolean).join(' ');
+  document.getElementById('bike-summary').textContent =
+    (parts || 'No bike configured yet') +
+    (bike.color ? ` · ${bike.color}` : '') +
+    ` · within ${bike.radius_miles} mi`;
+
+  const sourcesEl = document.getElementById('sources');
+  sourcesEl.innerHTML = '';
+  for (const [name, enabled] of Object.entries(bike.sources || {})) {
+    const span = document.createElement('span');
+    span.className = 'badge' + (enabled ? ' on' : '');
+    span.textContent = name;
+    sourcesEl.appendChild(span);
+  }
+
+  const banner = document.getElementById('error-banner');
+  if (bike.last_refresh_error) {
+    banner.style.display = 'block';
+    banner.textContent = 'Last refresh had errors: ' + bike.last_refresh_error;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+async function loadListings() {
+  const minScore = document.getElementById('min-score').value;
+  const res = await fetch(`${API.listings}?min_score=${minScore}`);
+  allListings = await res.json();
+  render();
+}
+
+function render() {
+  const statusFilter = document.getElementById('status-filter').value;
+  const grid = document.getElementById('grid');
+  const emptyState = document.getElementById('empty-state');
+  grid.innerHTML = '';
+
+  const filtered = allListings.filter((l) => !statusFilter || l.status === statusFilter);
+  document.getElementById('result-count').textContent = `${filtered.length} listing(s)`;
+  emptyState.style.display = filtered.length ? 'none' : 'block';
+
+  for (const listing of filtered) {
+    grid.appendChild(renderCard(listing));
+  }
+}
+
+function renderCard(listing) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  if (listing.image_url) {
+    const img = document.createElement('img');
+    img.src = listing.image_url;
+    img.alt = listing.title;
+    img.loading = 'lazy';
+    card.appendChild(img);
+  } else {
+    const ph = document.createElement('div');
+    ph.className = 'no-image';
+    ph.textContent = 'No image';
+    card.appendChild(ph);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+
+  const score = document.createElement('span');
+  score.className = 'score';
+  score.textContent = `score ${listing.score}`;
+  body.appendChild(score);
+
+  const title = document.createElement('div');
+  title.className = 'card-title';
+  const a = document.createElement('a');
+  a.href = listing.url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = listing.title;
+  title.appendChild(a);
+  body.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta-row';
+  const price = listing.price_usd != null ? `$${listing.price_usd}` : 'no price';
+  const dist = listing.distance_miles != null ? `${listing.distance_miles} mi` : '';
+  meta.innerHTML = `<span>${listing.source} · ${price}</span><span>${dist}</span>`;
+  body.appendChild(meta);
+
+  if (listing.score_reasons && listing.score_reasons.length) {
+    const reasons = document.createElement('ul');
+    reasons.className = 'reasons';
+    for (const r of listing.score_reasons) {
+      const li = document.createElement('li');
+      li.textContent = r;
+      reasons.appendChild(li);
+    }
+    body.appendChild(reasons);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  const statuses = [
+    ['reviewed', 'Reviewed'],
+    ['false_positive', 'Not it'],
+    ['contacted_police', 'Reported'],
+  ];
+  for (const [value, label] of statuses) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    if (listing.status === value) btn.classList.add('active');
+    btn.addEventListener('click', () => setStatus(listing.id, value));
+    actions.appendChild(btn);
+  }
+  body.appendChild(actions);
+
+  card.appendChild(body);
+  return card;
+}
+
+async function setStatus(id, status) {
+  await fetch(API.status(id), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  await loadListings();
+}
+
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.textContent = 'Refreshing…';
+  try {
+    await fetch(API.refresh, { method: 'POST' });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh listings';
+    await Promise.all([loadBike(), loadListings()]);
+  }
+});
+
+document.getElementById('min-score').addEventListener('change', loadListings);
+document.getElementById('status-filter').addEventListener('change', render);
+
+loadBike();
+loadListings();
+</script>
+</body>
+</html>

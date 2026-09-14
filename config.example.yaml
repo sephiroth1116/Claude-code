@@ -1,0 +1,41 @@
+# Copy this file to config.yaml and fill in your bike's details.
+# config.yaml is gitignored so your personal info never gets committed.
+
+bike:
+  make: ""              # e.g. "Trek"
+  model: ""              # e.g. "FX 3 Disc"
+  year: ""                # e.g. "2021" (optional)
+  color: ""               # e.g. "matte black with orange accents"
+  frame_size: ""          # e.g. "M" or "54cm"
+  features:                # distinguishing details, one per line
+    - ""                    # e.g. "sticker of a skull on top tube"
+    - ""                    # e.g. "scratch on left crank arm"
+  stolen_date: ""          # YYYY-MM-DD, used to ignore listings posted before this
+  approx_value_usd: null    # what it's worth; used to flag suspiciously cheap listings
+
+search:
+  # Either give a city name Craigslist recognizes as a subdomain (see sources.craigslist.site
+  # below) or a lat/lon pair for distance calculations against Craigslist's geotagged listings.
+  lat: null
+  lon: null
+  radius_miles: 25
+  extra_keywords: []        # optional extra search terms, e.g. ["road bike", "hybrid"]
+
+sources:
+  craigslist:
+    enabled: true
+    site: ""                # subdomain, e.g. "sfbay", "losangeles", "seattle"
+    category: "bika"         # bika = bikes for sale by owner; use "bikd" for parts
+  ebay:
+    enabled: false
+    # App ID / Cert ID come from EBAY_APP_ID / EBAY_CERT_ID env vars, not here.
+  facebook:
+    enabled: false           # off by default -- see README before turning this on
+
+alerts:
+  email:
+    enabled: false
+    to: ""
+    # SMTP credentials come from SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS env vars.
+
+refresh_interval_minutes: 30
