@@ -29,6 +29,9 @@ search:
   lon: null
   radius_miles: 25
   extra_keywords: []        # optional extra search terms, e.g. ["road bike", "hybrid"]
+  exclude_keywords: []      # listings mentioning any of these are dropped entirely, regardless
+                              # of score -- e.g. ["mountain bike", "hardtail", "fatboy"] if your
+                              # bike shares a make with product lines that could never be it
 
 sources:
   craigslist:

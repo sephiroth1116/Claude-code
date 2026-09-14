@@ -135,6 +135,12 @@ that bike's `stolen_date`, or outside your radius (for sources that expose locat
 are filtered out entirely. Tune the weights at the top of `matching.py` if it's over- or
 under-matching for you.
 
+`search.exclude_keywords` in `config.yaml` is a hard filter, checked before anything else:
+any listing mentioning one of those terms is dropped outright, no matter how it scores.
+Useful when your bike's make also makes product lines that could never be it -- e.g. a
+Specialized owner searching just on "Specialized" will otherwise see every Hardrock,
+Rockhopper, and Fatboy in the metro, since those all mention the same make.
+
 The search query sent to each source is deliberately just the bike's make (falling back
 to model) — most search boxes, Craigslist included, AND-match every word in a query, so
 a query built from make + model + extra keywords together almost never matches anything

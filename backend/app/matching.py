@@ -131,10 +131,17 @@ def compute_distance(listing: Listing, config: AppConfig) -> None:
 
 
 def is_relevant(listing: Listing, config: AppConfig) -> bool:
-    """Hard filters: posted before the matched bike's theft, or outside the search radius.
+    """Hard filters: posted before the matched bike's theft, outside the search radius,
+    or matching one of search.exclude_keywords (e.g. "mountain bike", "fatboy" -- things
+    that share your bike's make but are never going to be the bike itself).
 
     Call this after score_listing() has set listing.matched_bike.
     """
+    text = f"{listing.title} {listing.description}"
+    for keyword in config.search.exclude_keywords:
+        if keyword and _fuzzy_contains(text, keyword):
+            return False
+
     bike = next((b for b in config.bikes if b.name == listing.matched_bike), None)
     if bike and bike.stolen_date and listing.posted_at:
         posted = _parse_date(listing.posted_at)

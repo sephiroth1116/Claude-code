@@ -34,6 +34,7 @@ class SearchArea:
     lon: float | None = None
     radius_miles: float = 25
     extra_keywords: list[str] = field(default_factory=list)
+    exclude_keywords: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -112,6 +113,7 @@ def load_config() -> AppConfig:
         lon=search_raw.get("lon"),
         radius_miles=search_raw.get("radius_miles", 25),
         extra_keywords=search_raw.get("extra_keywords", []) or [],
+        exclude_keywords=search_raw.get("exclude_keywords", []) or [],
     )
 
     sources_raw = raw.get("sources", {})
