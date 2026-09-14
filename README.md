@@ -17,11 +17,14 @@ alerted if it shows up.
 - **Craigslist** — queries the plain search page for your local subdomain (no API key
   needed). Craigslist discontinued RSS feeds for search results, so this parses the
   no-JS "static" result list instead, which is still server-rendered HTML and doesn't
-  need a browser. Trade-off: that page doesn't expose per-listing images, exact
-  coordinates, or posted dates, so those fields are blank for Craigslist results —
-  radius is still enforced server-side (confirmed against a live search), and results
-  come back sorted newest-first. Click through to the listing to see photos and post
-  date. This is the most reliable source here despite the missing fields.
+  need a browser. That result list doesn't include images, exact coordinates, or posted
+  dates, so for any *new* listing that already scored some textual match, one extra
+  request fetches its photo and posted date from the listing's own page (bounded to 6
+  concurrent requests, and skipped entirely for zero-score or already-seen listings, to
+  keep total request volume reasonable). Radius is enforced server-side by Craigslist
+  itself via the search's lat/lon params (confirmed against a live search), and the
+  posted date is what powers the "ignore anything posted before the bike was stolen"
+  filter below. This is the most reliable source here.
 - **eBay** — uses the official Browse API (needs a free developer app). eBay is a
   national marketplace, not local classifieds, so "radius" doesn't really apply — most
   results ship. Included because resold stolen parts/bikes do show up there, but treat
@@ -95,6 +98,11 @@ auto-refreshes on the interval set by `refresh_interval_minutes` in `config.yaml
 color, features, suspiciously-low price), plus a link to the original listing. Mark
 listings as Reviewed / Not it / Reported to keep track as you go through them.
 
+The **search radius slider** at the top (with 50/250/500 mi quick-select buttons) overrides
+`config.yaml`'s radius for the next refresh, and stays in effect for auto-refreshes after
+that until you change it again or restart the server -- edit `config.yaml` if you want a
+different permanent default.
+
 ## How matching works
 
 Simple, transparent keyword scoring (`backend/app/matching.py`) — no ML, nothing hidden:
@@ -125,5 +133,9 @@ works far better in practice.
   unless the seller happened to mention a feature you also listed. It also means an
   unrelated item that happens to share a make/color/price range (a pair of cycling shoes,
   say) can outscore a real bike listing — that's expected, not a bug; review before acting.
-- Craigslist cards in the dashboard won't show a thumbnail or exact post date (see the
-  Craigslist section above) — click through to the listing for those.
+- Craigslist thumbnails and post dates only get fetched for listings that scored above 0
+  (see the Craigslist section above) — a zero-score listing shows no image, and if you
+  drop min score down to "Any" you'll see cards with neither, that's expected.
+- Changing the radius slider only affects Craigslist's own search results (which is where
+  radius filtering actually happens server-side); eBay's results aren't filtered by
+  distance regardless of the slider, per the eBay note above.

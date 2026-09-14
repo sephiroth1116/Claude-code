@@ -6,14 +6,20 @@ list (<li class="cl-static-search-result">), which is server-rendered and doesn'
 a browser. Confirmed against a live search: lat/lon + search_distance query params still
 do server-side radius filtering on this endpoint, same as the old RSS one did.
 
-This does NOT get per-listing images, exact geo-coordinates, or posted dates -- none of
-that is in the static result list, and fetching each listing's own page to get them would
-multiply request volume by however many results come back. distance_miles and posted_at
+This does NOT get per-listing images, exact geo-coordinates, or posted dates from the
+search results themselves -- none of that is in the static result list, and fetching
+every listing's own page just to get them would multiply request volume by however many
+results come back (hundreds, for a broad make-only query). distance_miles and posted_at
 are left unset for Craigslist results; the radius restriction still happens server-side
 via the lat/lon/search_distance params below, and results come back sorted newest-first.
+
+Images and posted dates are fetched lazily instead, via fetch_listing_details() below --
+callers should only call it for listings that already scored some textual match, not the
+whole result set, to keep that trade-off intact.
 """
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 from typing import Iterable
 
@@ -126,3 +132,25 @@ def _extract_price(text: str) -> float | None:
         return float(digits) if digits else None
     except ValueError:
         return None
+
+
+_OG_IMAGE_RE = re.compile(r'<meta property="og:image" content="([^"]+)"')
+_POSTED_TIME_RE = re.compile(r'<time class="date timeago" datetime="([^"]+)"')
+
+
+def fetch_listing_details(listing_url: str) -> tuple[str | None, str | None]:
+    """Best-effort fetch of a single listing's main photo and posted date (image_url,
+    posted_at). One request per call -- only call this for listings worth the extra
+    round trip (new, and already scored some textual match)."""
+    try:
+        resp = requests.get(listing_url, headers={"User-Agent": _USER_AGENT}, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None, None
+
+    image_match = _OG_IMAGE_RE.search(resp.text)
+    date_match = _POSTED_TIME_RE.search(resp.text)
+    return (
+        image_match.group(1) if image_match else None,
+        date_match.group(1) if date_match else None,
+    )

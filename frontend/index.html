@@ -63,6 +63,25 @@
     margin-bottom: 16px;
     font-size: 0.9rem;
   }
+  .radius-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .radius-control label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .radius-control strong { color: var(--text); }
+  #radius-slider { flex: 1; min-width: 140px; max-width: 320px; accent-color: var(--accent); }
+  .radius-presets { display: flex; gap: 6px; }
+  .radius-presets button {
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    border-radius: 999px;
+  }
+  .radius-presets button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); }
   #error-banner {
     display: none;
@@ -128,6 +147,16 @@
 
   <div id="error-banner"></div>
 
+  <div class="radius-control">
+    <label for="radius-slider">Search radius: <strong id="radius-value">30</strong> mi</label>
+    <input type="range" id="radius-slider" min="5" max="500" step="5" value="30" />
+    <div class="radius-presets">
+      <button type="button" class="preset" data-radius="50">50 mi</button>
+      <button type="button" class="preset" data-radius="250">250 mi</button>
+      <button type="button" class="preset" data-radius="500">500 mi</button>
+    </div>
+  </div>
+
   <div class="controls">
     <label>Min score
       <select id="min-score">
@@ -167,6 +196,7 @@ const API = {
 };
 
 let allListings = [];
+let _radiusTouchedByUser = false;
 
 async function loadBikes() {
   const res = await fetch(API.bikes);
@@ -188,6 +218,13 @@ async function loadBikes() {
     radiusLine.className = 'radius-line';
     radiusLine.textContent = `Searching within ${data.radius_miles} mi`;
     listEl.appendChild(radiusLine);
+  }
+
+  if (data.radius_miles != null && !_radiusTouchedByUser) {
+    const slider = document.getElementById('radius-slider');
+    slider.value = Math.min(Math.max(data.radius_miles, slider.min), slider.max);
+    document.getElementById('radius-value').textContent = slider.value;
+    updateRadiusPresetActive();
   }
 
   const bikeFilter = document.getElementById('bike-filter');
@@ -335,12 +372,36 @@ async function setStatus(id, status) {
   await loadListings();
 }
 
+function updateRadiusPresetActive() {
+  const value = document.getElementById('radius-slider').value;
+  document.querySelectorAll('.radius-presets .preset').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.radius === value);
+  });
+}
+
+document.getElementById('radius-slider').addEventListener('input', (e) => {
+  _radiusTouchedByUser = true;
+  document.getElementById('radius-value').textContent = e.target.value;
+  updateRadiusPresetActive();
+});
+
+document.querySelectorAll('.radius-presets .preset').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    _radiusTouchedByUser = true;
+    const slider = document.getElementById('radius-slider');
+    slider.value = btn.dataset.radius;
+    document.getElementById('radius-value').textContent = btn.dataset.radius;
+    updateRadiusPresetActive();
+  });
+});
+
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
+  const radiusMiles = document.getElementById('radius-slider').value;
   btn.disabled = true;
   btn.textContent = 'Refreshing…';
   try {
-    await fetch(API.refresh, { method: 'POST' });
+    await fetch(`${API.refresh}?radius_miles=${encodeURIComponent(radiusMiles)}`, { method: 'POST' });
   } finally {
     btn.disabled = false;
     btn.textContent = 'Refresh listings';

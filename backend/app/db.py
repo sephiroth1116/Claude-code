@@ -103,6 +103,15 @@ def upsert_listing(listing: Listing) -> bool:
         conn.close()
 
 
+def listing_exists(listing_id: str) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT 1 FROM listings WHERE id = ?", (listing_id,)).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def list_listings(min_score: float = 0.0) -> list[dict]:
     conn = get_connection()
     try:

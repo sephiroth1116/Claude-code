@@ -13,8 +13,10 @@ from pydantic import BaseModel
 from . import db
 from .config import AppConfig, load_config
 from .matching import build_search_queries, compute_distance, is_relevant, score_listing
-from .scrapers.craigslist import CraigslistScraper
+from .scrapers.craigslist import CraigslistScraper, fetch_listing_details
 from .scrapers.ebay import EbayScraper
+
+_DETAILS_FETCH_CONCURRENCY = 6  # be polite to Craigslist's servers
 
 logger = logging.getLogger("bike_finder")
 logging.basicConfig(level=logging.INFO)
@@ -61,7 +63,6 @@ async def run_refresh() -> dict:
         if not queries:
             raise RuntimeError("config.yaml has no bikes with make/model set yet -- nothing to search for.")
 
-        new_count = 0
         seen_count = 0
         errors: list[str] = []
 
@@ -73,6 +74,7 @@ async def run_refresh() -> dict:
 
         loop = asyncio.get_event_loop()
         seen_ids: set[str] = set()
+        candidates = []
         for scraper in scrapers:
             for query in queries:
                 try:
@@ -90,18 +92,49 @@ async def run_refresh() -> dict:
 
                     compute_distance(listing, config)
                     score_listing(listing, config)
-                    if not is_relevant(listing, config):
-                        continue
-                    is_new = db.upsert_listing(listing)
-                    if is_new:
-                        new_count += 1
+                    candidates.append(listing)
+
+        # Craigslist's own search results don't include a posted date or image -- only
+        # fetch those (one extra request per listing) for genuinely new listings that
+        # already matched on text, so a stale-date cutoff and photos are both possible
+        # without hitting Craigslist once per every one of a few hundred results.
+        needs_details = [
+            listing
+            for listing in candidates
+            if listing.source == "craigslist" and listing.score > 0 and not db.listing_exists(listing.id)
+        ]
+        if needs_details:
+            semaphore = asyncio.Semaphore(_DETAILS_FETCH_CONCURRENCY)
+
+            async def _fetch(listing):
+                async with semaphore:
+                    try:
+                        image_url, posted_at = await loop.run_in_executor(
+                            None, fetch_listing_details, listing.url
+                        )
+                        listing.image_url = image_url
+                        listing.posted_at = posted_at
+                    except Exception:
+                        logger.exception("Detail fetch failed for %s", listing.url)
+
+            await asyncio.gather(*(_fetch(listing) for listing in needs_details))
+
+        new_count = 0
+        for listing in candidates:
+            if not is_relevant(listing, config):
+                continue
+            is_new = db.upsert_listing(listing)
+            if is_new:
+                new_count += 1
 
         _last_refresh_error = "; ".join(errors) if errors else None
         return {"seen": seen_count, "new": new_count, "errors": errors}
 
 
 @app.post("/api/refresh")
-async def refresh() -> dict:
+async def refresh(radius_miles: float | None = None) -> dict:
+    if radius_miles is not None:
+        get_config().search.radius_miles = radius_miles
     try:
         return await run_refresh()
     except RuntimeError as exc:
