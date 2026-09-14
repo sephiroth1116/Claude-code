@@ -130,6 +130,14 @@ def compute_distance(listing: Listing, config: AppConfig) -> None:
     )
 
 
+def is_excluded_text(text: str, exclude_keywords: list[str]) -> bool:
+    """True if `text` mentions any of exclude_keywords. Used both for new listings
+    (in is_relevant) and to re-filter listings already sitting in the database, so
+    adding a keyword to config.yaml hides matching listings immediately on next load
+    instead of only affecting listings scraped after that point."""
+    return any(keyword and _fuzzy_contains(text, keyword) for keyword in exclude_keywords)
+
+
 def is_relevant(listing: Listing, config: AppConfig) -> bool:
     """Hard filters: posted before the matched bike's theft, outside the search radius,
     or matching one of search.exclude_keywords (e.g. "mountain bike", "fatboy" -- things
@@ -138,9 +146,8 @@ def is_relevant(listing: Listing, config: AppConfig) -> bool:
     Call this after score_listing() has set listing.matched_bike.
     """
     text = f"{listing.title} {listing.description}"
-    for keyword in config.search.exclude_keywords:
-        if keyword and _fuzzy_contains(text, keyword):
-            return False
+    if is_excluded_text(text, config.search.exclude_keywords):
+        return False
 
     bike = next((b for b in config.bikes if b.name == listing.matched_bike), None)
     if bike and bike.stolen_date and listing.posted_at:

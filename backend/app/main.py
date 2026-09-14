@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from . import db
 from .config import AppConfig, load_config
-from .matching import build_search_queries, compute_distance, is_relevant, score_listing
+from .matching import build_search_queries, compute_distance, is_excluded_text, is_relevant, score_listing
 from .scrapers.craigslist import CraigslistScraper, fetch_listing_details
 from .scrapers.ebay import EbayScraper
 from .scrapers.facebook import FacebookScraper
@@ -150,7 +150,15 @@ async def refresh(radius_miles: float | None = None) -> dict:
 
 @app.get("/api/listings")
 async def get_listings(min_score: float = 0.0, sort: str = "score") -> list[dict]:
-    return db.list_listings(min_score=min_score, sort=sort)
+    config = get_config()
+    listings = db.list_listings(min_score=min_score, sort=sort)
+    if config.search.exclude_keywords:
+        listings = [
+            l
+            for l in listings
+            if not is_excluded_text(f"{l['title']} {l['description']}", config.search.exclude_keywords)
+        ]
+    return listings
 
 
 class StatusUpdate(BaseModel):
