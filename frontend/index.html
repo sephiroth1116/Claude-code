@@ -127,7 +127,20 @@
     background: var(--good-soft);
     color: var(--good);
   }
+  .source-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: white;
+  }
+  .source-craigslist { background: #7c3aed; }
+  .source-ebay { background: #0064d2; }
+  .source-facebook { background: #1877f2; }
+  .source-other { background: #6b6862; }
   .reasons { font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 16px; }
+  .listing-details { font-size: 0.78rem; color: var(--muted); }
   .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
   .card-actions button { flex: 1; font-size: 0.75rem; padding: 6px 8px; }
   .card-actions button.active { background: var(--good-soft); border-color: var(--good); color: var(--good); }
@@ -256,6 +269,27 @@ async function loadBikes() {
   }
 }
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : str;
+  return div.innerHTML;
+}
+
+function formatPostedDate(isoString) {
+  if (!isoString) return 'date unknown';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return 'date unknown';
+
+  const diffMs = Date.now() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  if (diffDays <= 0) return `${dateLabel} (today)`;
+  if (diffDays === 1) return `${dateLabel} (yesterday)`;
+  if (diffDays < 14) return `${dateLabel} (${diffDays}d ago)`;
+  return dateLabel;
+}
+
 async function loadListings() {
   const minScore = document.getElementById('min-score').value;
   const res = await fetch(`${API.listings}?min_score=${minScore}`);
@@ -303,6 +337,11 @@ function renderCard(listing) {
 
   const scoreRow = document.createElement('div');
   scoreRow.className = 'score-row';
+  const sourceBadge = document.createElement('span');
+  const knownSources = ['craigslist', 'ebay', 'facebook'];
+  sourceBadge.className = 'source-badge ' + (knownSources.includes(listing.source) ? `source-${listing.source}` : 'source-other');
+  sourceBadge.textContent = listing.source;
+  scoreRow.appendChild(sourceBadge);
   const score = document.createElement('span');
   score.className = 'score';
   score.textContent = `score ${listing.score}`;
@@ -329,8 +368,14 @@ function renderCard(listing) {
   meta.className = 'meta-row';
   const price = listing.price_usd != null ? `$${listing.price_usd}` : 'no price';
   const dist = listing.distance_miles != null ? `${listing.distance_miles} mi` : '';
-  meta.innerHTML = `<span>${listing.source} · ${price}</span><span>${dist}</span>`;
+  const leftBits = [price, listing.location_text].filter(Boolean).join(' · ');
+  meta.innerHTML = `<span>${escapeHtml(leftBits)}</span><span>${escapeHtml(dist)}</span>`;
   body.appendChild(meta);
+
+  const details = document.createElement('div');
+  details.className = 'listing-details';
+  details.textContent = 'Posted ' + formatPostedDate(listing.posted_at);
+  body.appendChild(details);
 
   if (listing.score_reasons && listing.score_reasons.length) {
     const reasons = document.createElement('ul');
