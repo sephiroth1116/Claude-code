@@ -21,9 +21,17 @@ alerted if it shows up.
   dates, so for any *new* listing that already scored some textual match, one extra
   request fetches its photo and posted date from the listing's own page (bounded to 6
   concurrent requests, and skipped entirely for zero-score or already-seen listings, to
-  keep total request volume reasonable). Radius is enforced server-side by Craigslist
-  itself via the search's lat/lon params (confirmed against a live search), and the
-  posted date is what powers the "ignore anything posted before the bike was stolen"
+  keep total request volume reasonable).
+
+  Craigslist has no single nationwide search -- the US is split into ~700 separate
+  regional sites (`minneapolis`, `chicago`, `madison`, ...), each with its own listings,
+  and a site's own radius param only filters *within that one site*, never into a
+  neighboring one. So the radius slider works by fetching Craigslist's published list of
+  all US sites and their coordinates, picking every site within the chosen radius, and
+  querying all of them concurrently -- at 30mi that's usually just your own site; at
+  500mi it can be 80+ sites, which takes longer (tens of seconds) but actually returns
+  results from that far out, unlike a plain distance param would. The posted date is what
+  powers the "ignore anything posted before the bike was stolen"
   filter below. This is the most reliable source here.
 - **eBay** — uses the official Browse API (needs a free developer app). eBay is a
   national marketplace, not local classifieds, so "radius" doesn't really apply — most
