@@ -112,11 +112,20 @@ def listing_exists(listing_id: str) -> bool:
         conn.close()
 
 
-def list_listings(min_score: float = 0.0) -> list[dict]:
+_SORT_CLAUSES = {
+    "score": "score DESC, price_usd IS NULL, price_usd ASC",
+    "date": "COALESCE(posted_at, first_seen_at) DESC",
+    "cost": "price_usd IS NULL, price_usd ASC",
+    "distance": "distance_miles IS NULL, distance_miles ASC",
+}
+
+
+def list_listings(min_score: float = 0.0, sort: str = "score") -> list[dict]:
+    order_by = _SORT_CLAUSES.get(sort, _SORT_CLAUSES["score"])
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM listings WHERE score >= ? ORDER BY score DESC, first_seen_at DESC",
+            f"SELECT * FROM listings WHERE score >= ? ORDER BY {order_by}",
             (min_score,),
         ).fetchall()
         result = []

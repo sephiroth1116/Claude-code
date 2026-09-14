@@ -149,8 +149,8 @@ async def refresh(radius_miles: float | None = None) -> dict:
 
 
 @app.get("/api/listings")
-async def get_listings(min_score: float = 0.0) -> list[dict]:
-    return db.list_listings(min_score=min_score)
+async def get_listings(min_score: float = 0.0, sort: str = "score") -> list[dict]:
+    return db.list_listings(min_score=min_score, sort=sort)
 
 
 class StatusUpdate(BaseModel):

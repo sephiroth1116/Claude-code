@@ -111,6 +111,18 @@ The **search radius slider** at the top (with 50/250/500 mi quick-select buttons
 that until you change it again or restart the server -- edit `config.yaml` if you want a
 different permanent default.
 
+The **min price slider** (100/250/500/750/$1000+ presets) filters out anything priced below
+that threshold -- purely client-side, so it applies instantly without a refresh, and
+listings with no price at all are hidden once it's above $0 (since there's nothing to
+compare). **Sort by** controls ordering: Score (ties broken by cheapest first, the
+default), Date posted, Cost, or Distance.
+
+Distance shown per listing is an approximation for Craigslist results: since the search
+results list doesn't expose a listing's exact coordinates (see below), each one is tagged
+with the distance from you to the *Craigslist site* it came from (e.g. everything from the
+"minneapolis" site shows the same distance) rather than its literal address -- close enough
+to gauge how far away something is, not precise to the block.
+
 ## How matching works
 
 Simple, transparent keyword scoring (`backend/app/matching.py`) — no ML, nothing hidden:

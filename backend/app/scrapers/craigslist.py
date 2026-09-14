@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Iterable
 
@@ -73,14 +74,18 @@ def _load_us_sites() -> list[dict]:
     return _areas_cache
 
 
-def _sites_within_radius(lat: float, lon: float, radius_miles: float, fallback_site: str) -> list[str]:
+def _sites_within_radius(lat: float, lon: float, radius_miles: float, fallback_site: str) -> list[dict]:
+    """Returns {hostname, lat, lon} for every site within radius, so callers can tag
+    each listing with its site's coordinates -- close enough for a "miles away" figure
+    without geocoding every individual listing."""
     sites = _load_us_sites()
     if not sites:
-        return [fallback_site]
+        return [{"hostname": fallback_site, "lat": None, "lon": None}]
 
-    within = [s["hostname"] for s in sites if haversine_miles(lat, lon, s["lat"], s["lon"]) <= radius_miles]
-    if fallback_site not in within:
-        within.append(fallback_site)
+    within = [s for s in sites if haversine_miles(lat, lon, s["lat"], s["lon"]) <= radius_miles]
+    if not any(s["hostname"] == fallback_site for s in within):
+        fallback = next((s for s in sites if s["hostname"] == fallback_site), None)
+        within.append(fallback or {"hostname": fallback_site, "lat": None, "lon": None})
     return within
 
 
@@ -143,27 +148,40 @@ class CraigslistScraper:
                 self.search_area.lat, self.search_area.lon, self.search_area.radius_miles, self.config.site
             )
         else:
-            sites = [self.config.site]
+            fallback = next(
+                (s for s in _load_us_sites() if s["hostname"] == self.config.site),
+                {"hostname": self.config.site, "lat": None, "lon": None},
+            )
+            sites = [fallback]
 
-        seen_ids: set[str] = set()
-        results: list[Listing] = []
+        # Craigslist shows a listing under more than one nearby site when large radii
+        # overlap (a Minneapolis listing can also turn up in an Eau Claire search), so
+        # the same listing ID can arrive twice tagged with two different sites' coords.
+        # Keep whichever site is closest to the searcher's own location -- the true
+        # origin is almost always the nearest site that returned it, not a distant one.
+        best_by_id: dict[str, tuple[float, Listing]] = {}
         with ThreadPoolExecutor(max_workers=min(_SITE_QUERY_CONCURRENCY, len(sites))) as pool:
             futures = {pool.submit(self._search_one_site, site, query): site for site in sites}
             for future in as_completed(futures):
                 site = futures[future]
                 try:
+                    site_distance = (
+                        haversine_miles(self.search_area.lat, self.search_area.lon, site["lat"], site["lon"])
+                        if self.search_area.lat is not None and site["lat"] is not None
+                        else 0.0
+                    )
                     for listing in future.result():
-                        if listing.id in seen_ids:
-                            continue
-                        seen_ids.add(listing.id)
-                        results.append(listing)
+                        existing = best_by_id.get(listing.id)
+                        if existing is None or site_distance < existing[0]:
+                            best_by_id[listing.id] = (site_distance, listing)
                 except Exception:
-                    logger.exception("Craigslist query failed for site %r", site)
+                    logger.exception("Craigslist query failed for site %r", site["hostname"])
 
-        return results
+        return [listing for _, listing in best_by_id.values()]
 
-    def _search_one_site(self, site: str, query: str) -> Iterable[Listing]:
-        url = f"https://{site}.craigslist.org/search/{self.config.category}"
+    def _search_one_site(self, site: dict, query: str) -> Iterable[Listing]:
+        hostname = site["hostname"]
+        url = f"https://{hostname}.craigslist.org/search/{self.config.category}"
         params = {"query": query, "sort": "date"}
         if self.search_area.lat is not None and self.search_area.lon is not None:
             params["lat"] = self.search_area.lat
@@ -175,7 +193,7 @@ class CraigslistScraper:
 
         return list(self._parse_html(resp.text, site))
 
-    def _parse_html(self, html_text: str, site: str) -> Iterable[Listing]:
+    def _parse_html(self, html_text: str, site: dict) -> Iterable[Listing]:
         parser = _ResultListParser()
         parser.feed(html_text)
 
@@ -193,9 +211,12 @@ class CraigslistScraper:
                 price_usd=_extract_price(item["price"]),
                 url=url,
                 image_url=None,
-                location_text=item["location"] or site,
-                lat=None,
-                lon=None,
+                location_text=item["location"] or site["hostname"],
+                # Approximate: the site's own hub city, not the listing's exact address --
+                # Craigslist's static result list doesn't expose per-listing coordinates.
+                # Close enough for a "how far away" figure without geocoding every listing.
+                lat=site["lat"],
+                lon=site["lon"],
                 posted_at=None,
                 first_seen_at=now_iso(),
             )
@@ -225,7 +246,18 @@ def fetch_listing_details(listing_url: str) -> tuple[str | None, str | None]:
 
     image_match = _OG_IMAGE_RE.search(resp.text)
     date_match = _POSTED_TIME_RE.search(resp.text)
-    return (
-        image_match.group(1) if image_match else None,
-        date_match.group(1) if date_match else None,
-    )
+    return image_match.group(1) if image_match else None, _normalize_to_utc(date_match)
+
+
+def _normalize_to_utc(date_match: re.Match | None) -> str | None:
+    """Craigslist's posted-date carries the site's own local offset (e.g. -0500). Convert
+    to UTC so that sorting listings by posted_at as plain strings is actually correct
+    across sites in different timezones -- not just visually similar."""
+    if not date_match:
+        return None
+    raw = date_match.group(1)
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S%z")
+        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except ValueError:
+        return raw

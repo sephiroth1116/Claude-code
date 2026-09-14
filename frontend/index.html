@@ -170,7 +170,27 @@
     </div>
   </div>
 
+  <div class="radius-control">
+    <label for="price-slider">Min price: <strong id="price-value">Any</strong></label>
+    <input type="range" id="price-slider" min="0" max="1000" step="25" value="0" />
+    <div class="radius-presets">
+      <button type="button" class="price-preset" data-price="100">$100</button>
+      <button type="button" class="price-preset" data-price="250">$250</button>
+      <button type="button" class="price-preset" data-price="500">$500</button>
+      <button type="button" class="price-preset" data-price="750">$750</button>
+      <button type="button" class="price-preset" data-price="1000">$1000+</button>
+    </div>
+  </div>
+
   <div class="controls">
+    <label>Sort by
+      <select id="sort-by">
+        <option value="score" selected>Score (then cost)</option>
+        <option value="date">Date posted</option>
+        <option value="cost">Cost</option>
+        <option value="distance">Distance</option>
+      </select>
+    </label>
     <label>Min score
       <select id="min-score">
         <option value="0">Any</option>
@@ -292,7 +312,8 @@ function formatPostedDate(isoString) {
 
 async function loadListings() {
   const minScore = document.getElementById('min-score').value;
-  const res = await fetch(`${API.listings}?min_score=${minScore}`);
+  const sort = document.getElementById('sort-by').value;
+  const res = await fetch(`${API.listings}?min_score=${minScore}&sort=${encodeURIComponent(sort)}`);
   allListings = await res.json();
   render();
 }
@@ -300,12 +321,16 @@ async function loadListings() {
 function render() {
   const statusFilter = document.getElementById('status-filter').value;
   const bikeFilter = document.getElementById('bike-filter').value;
+  const minPrice = Number(document.getElementById('price-slider').value);
   const grid = document.getElementById('grid');
   const emptyState = document.getElementById('empty-state');
   grid.innerHTML = '';
 
   const filtered = allListings.filter(
-    (l) => (!statusFilter || l.status === statusFilter) && (!bikeFilter || l.matched_bike === bikeFilter)
+    (l) =>
+      (!statusFilter || l.status === statusFilter) &&
+      (!bikeFilter || l.matched_bike === bikeFilter) &&
+      (minPrice <= 0 || (l.price_usd != null && l.price_usd >= minPrice))
   );
   document.getElementById('result-count').textContent = `${filtered.length} listing(s)`;
   emptyState.style.display = filtered.length ? 'none' : 'block';
@@ -440,6 +465,35 @@ document.querySelectorAll('.radius-presets .preset').forEach((btn) => {
   });
 });
 
+function priceValueLabel(value) {
+  const n = Number(value);
+  if (n <= 0) return 'Any';
+  return n >= 1000 ? '$1000+' : `$${n}`;
+}
+
+function updatePricePresetActive() {
+  const value = document.getElementById('price-slider').value;
+  document.querySelectorAll('.price-preset').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.price === value);
+  });
+}
+
+document.getElementById('price-slider').addEventListener('input', (e) => {
+  document.getElementById('price-value').textContent = priceValueLabel(e.target.value);
+  updatePricePresetActive();
+  render();
+});
+
+document.querySelectorAll('.price-preset').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const slider = document.getElementById('price-slider');
+    slider.value = btn.dataset.price;
+    document.getElementById('price-value').textContent = priceValueLabel(btn.dataset.price);
+    updatePricePresetActive();
+    render();
+  });
+});
+
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
   const radiusMiles = document.getElementById('radius-slider').value;
@@ -455,6 +509,7 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
 });
 
 document.getElementById('min-score').addEventListener('change', loadListings);
+document.getElementById('sort-by').addEventListener('change', loadListings);
 document.getElementById('status-filter').addEventListener('change', render);
 document.getElementById('bike-filter').addEventListener('change', render);
 
