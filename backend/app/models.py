@@ -8,7 +8,7 @@ from datetime import datetime
 @dataclass
 class Listing:
     id: str  # stable id: f"{source}:{external_id}"
-    source: str  # "craigslist" | "ebay" | "facebook"
+    source: str  # "craigslist" | "ebay" | "facebook" | "upway" | "pros_closet"
     title: str
     description: str
     price_usd: float | None
@@ -22,8 +22,10 @@ class Listing:
     distance_miles: float | None = None
     score: float = 0.0
     score_reasons: list[str] | None = None
-    matched_bike: str | None = None  # name of the bike this listing scored best against
-    status: str = "new"  # "new" | "reviewed" | "false_positive" | "contacted_police"
+    matched_brand: str | None = None  # which wishlist brand this listing matched
+    delivery_available: bool | None = None  # None = unknown; ships vs local-pickup-only
+    mileage_miles: float | None = None  # odometer miles on the bike, when the listing states it
+    status: str = "new"  # "new" | "interested" | "not_it" | "purchased"
 
     def to_dict(self) -> dict:
         return asdict(self)

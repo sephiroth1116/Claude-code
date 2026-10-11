@@ -1,4 +1,4 @@
-"""Loads config.yaml (bike description, search area, source toggles) plus secrets from env vars."""
+"""Loads config.yaml (shopping wishlist, search area, source toggles) plus secrets from env vars."""
 from __future__ import annotations
 
 import os
@@ -15,17 +15,14 @@ CONFIG_PATH = Path(os.environ.get("BIKE_FINDER_CONFIG", REPO_ROOT / "config.yaml
 
 
 @dataclass
-class BikeInfo:
-    name: str = ""  # short label for this bike, e.g. "Gazelle" -- shown in the dashboard
-    make: str = ""
-    model: str = ""
-    year: str = ""
-    color: str = ""
-    frame_size: str = ""
-    serial_number: str = ""
-    features: list[str] = field(default_factory=list)
-    stolen_date: str | None = None
-    approx_value_usd: float | None = None
+class WishlistConfig:
+    """What counts as a match -- this replaced the old per-bike stolen-bike profile once
+    the project repurposed from "find my stolen bike" to "find a bike worth buying"."""
+
+    brands: list[str] = field(default_factory=list)  # OR-matched: any one of these qualifies
+    require_class_3: bool = False  # hard filter: listing text must confirm Class 3 / 28mph
+    max_price_usd: float | None = None
+    keywords: list[str] = field(default_factory=list)  # extra positive signals, e.g. ["ebike"]
 
 
 @dataclass
@@ -55,6 +52,16 @@ class FacebookConfig:
 
 
 @dataclass
+class UcpStoreConfig:
+    """A Shopify store reachable via the UCP/MCP shopping protocol (see scrapers/ucp.py).
+    Upway and The Pro's Closet both run on this; any other Shopify-based bike shop with a
+    reachable /.well-known/ucp endpoint can be added the same way."""
+
+    enabled: bool = False
+    domain: str = ""  # e.g. "upway.co" -- scraper resolves the real MCP endpoint from here
+
+
+@dataclass
 class EmailAlertConfig:
     enabled: bool = False
     to: str = ""
@@ -62,11 +69,13 @@ class EmailAlertConfig:
 
 @dataclass
 class AppConfig:
-    bikes: list[BikeInfo]
+    wishlist: WishlistConfig
     search: SearchArea
     craigslist: CraigslistConfig
     ebay: EbayConfig
     facebook: FacebookConfig
+    upway: UcpStoreConfig
+    pros_closet: UcpStoreConfig
     email_alert: EmailAlertConfig
     refresh_interval_minutes: int = 30
 
@@ -88,24 +97,13 @@ def load_config() -> AppConfig:
 
     raw = yaml.safe_load(CONFIG_PATH.read_text()) or {}
 
-    bikes_raw = raw.get("bikes")
-    if bikes_raw is None and raw.get("bike"):
-        bikes_raw = [raw["bike"]]  # back-compat with the single-bike config shape
-    bikes = [
-        BikeInfo(
-            name=b.get("name") or b.get("make", "") or f"bike {i + 1}",
-            make=b.get("make", ""),
-            model=b.get("model", ""),
-            year=str(b.get("year", "") or ""),
-            color=b.get("color", ""),
-            frame_size=b.get("frame_size", ""),
-            serial_number=b.get("serial_number", ""),
-            features=[f for f in b.get("features", []) if f],
-            stolen_date=b.get("stolen_date") or None,
-            approx_value_usd=b.get("approx_value_usd"),
-        )
-        for i, b in enumerate(bikes_raw or [])
-    ]
+    wishlist_raw = raw.get("wishlist", {})
+    wishlist = WishlistConfig(
+        brands=[b for b in wishlist_raw.get("brands", []) if b],
+        require_class_3=bool(wishlist_raw.get("require_class_3", False)),
+        max_price_usd=wishlist_raw.get("max_price_usd"),
+        keywords=[k for k in wishlist_raw.get("keywords", []) if k],
+    )
 
     search_raw = raw.get("search", {})
     search = SearchArea(
@@ -122,16 +120,25 @@ def load_config() -> AppConfig:
     facebook = FacebookConfig(
         **{k: v for k, v in sources_raw.get("facebook", {}).items() if k == "enabled"}
     )
+    upway_raw = sources_raw.get("upway", {})
+    upway = UcpStoreConfig(enabled=upway_raw.get("enabled", False), domain=upway_raw.get("domain", "upway.co"))
+    pros_closet_raw = sources_raw.get("pros_closet", {})
+    pros_closet = UcpStoreConfig(
+        enabled=pros_closet_raw.get("enabled", False),
+        domain=pros_closet_raw.get("domain", "theproscloset.com"),
+    )
 
     alerts_raw = raw.get("alerts", {}).get("email", {})
     email_alert = EmailAlertConfig(enabled=alerts_raw.get("enabled", False), to=alerts_raw.get("to", ""))
 
     return AppConfig(
-        bikes=bikes,
+        wishlist=wishlist,
         search=search,
         craigslist=craigslist,
         ebay=ebay,
         facebook=facebook,
+        upway=upway,
+        pros_closet=pros_closet,
         email_alert=email_alert,
         refresh_interval_minutes=raw.get("refresh_interval_minutes", 30),
         ebay_app_id=os.environ.get("EBAY_APP_ID"),

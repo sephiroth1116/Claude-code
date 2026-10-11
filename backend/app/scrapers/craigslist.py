@@ -234,19 +234,67 @@ _OG_IMAGE_RE = re.compile(r'<meta property="og:image" content="([^"]+)"')
 _POSTED_TIME_RE = re.compile(r'<time class="date timeago" datetime="([^"]+)"')
 
 
-def fetch_listing_details(listing_url: str) -> tuple[str | None, str | None]:
-    """Best-effort fetch of a single listing's main photo and posted date (image_url,
-    posted_at). One request per call -- only call this for listings worth the extra
-    round trip (new, and already scored some textual match)."""
+class _PostingBodyParser(HTMLParser):
+    """Pulls the full listing description out of <section id="postingbody">. The search
+    results list only ever gives us a title -- specs like "Class 3" or exact mileage that
+    sellers do write down almost always live in this body text, not the title."""
+
+    def __init__(self):
+        super().__init__()
+        self.chunks: list[str] = []
+        self._in_body = False
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs_d = dict(attrs)
+        if tag == "section" and attrs_d.get("id") == "postingbody":
+            self._in_body = True
+            return
+        if not self._in_body:
+            return
+        if self._skip_depth:
+            self._skip_depth += 1
+            return
+        if "print-qrcode-container" in (attrs_d.get("class") or ""):
+            self._skip_depth = 1
+            return
+        if tag == "br":
+            self.chunks.append("\n")
+
+    def handle_endtag(self, tag):
+        if self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if tag == "section" and self._in_body:
+            self._in_body = False
+
+    def handle_data(self, data):
+        if self._in_body and not self._skip_depth:
+            self.chunks.append(data)
+
+    @property
+    def text(self) -> str:
+        return "".join(self.chunks).strip()
+
+
+def fetch_listing_details(listing_url: str) -> tuple[str | None, str | None, str]:
+    """Best-effort fetch of a single listing's main photo, posted date, and full
+    description (image_url, posted_at, description). One request per call -- only call
+    this for listings worth the extra round trip (new, and already scored some textual
+    match on title alone)."""
     try:
         resp = requests.get(listing_url, headers={"User-Agent": _USER_AGENT}, timeout=10)
         resp.raise_for_status()
     except requests.RequestException:
-        return None, None
+        return None, None, ""
 
     image_match = _OG_IMAGE_RE.search(resp.text)
     date_match = _POSTED_TIME_RE.search(resp.text)
-    return image_match.group(1) if image_match else None, _normalize_to_utc(date_match)
+
+    body_parser = _PostingBodyParser()
+    body_parser.feed(resp.text)
+
+    return image_match.group(1) if image_match else None, _normalize_to_utc(date_match), body_parser.text
 
 
 def _normalize_to_utc(date_match: re.Match | None) -> str | None:

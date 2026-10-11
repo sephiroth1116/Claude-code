@@ -1,26 +1,13 @@
-# Copy this file to config.yaml and fill in your bike(s)' details.
+# Copy this file to config.yaml and fill in your wishlist.
 # config.yaml is gitignored so your personal info never gets committed.
 
-bikes:
-  - name: "Bike 1"          # short label shown in the dashboard, e.g. "Gazelle"
-    make: ""                 # e.g. "Trek"
-    model: ""                 # e.g. "FX 3 Disc"
-    year: ""                   # e.g. "2021" (optional)
-    color: ""                  # e.g. "matte black with orange accents"
-    frame_size: ""             # e.g. "M" or "54cm"
-    serial_number: ""           # from the frame sticker -- sellers rarely list it, but
-                                  # it's worth having on record for the police report either way
-    features:                    # distinguishing details, one per line
-      - ""                        # e.g. "sticker of a skull on top tube"
-      - ""                        # e.g. "scratch on left crank arm"
-    stolen_date: ""             # YYYY-MM-DD, used to ignore listings posted before this
-    approx_value_usd: null       # what it's worth; used to flag suspiciously cheap listings
-
-  # Add more bikes by copying the block above -- every listing gets scored against
-  # all of them and tagged with whichever one it matched best.
-  # - name: "Bike 2"
-  #   make: ""
-  #   ...
+wishlist:
+  brands: []                 # OR-matched -- any one qualifies, e.g. ["Specialized", "Riese & Muller", "Gazelle"]
+  require_class_3: false     # if true, a listing must explicitly say "Class 3" / "28 mph" to count --
+                               # never inferred from brand/model alone, since the same model often ships
+                               # in multiple speed classes
+  max_price_usd: null         # optional hard ceiling; listings priced above this are dropped entirely
+  keywords: []                 # optional extra positive signals, e.g. ["ebike", "mid-drive"]
 
 search:
   # Either give a city name Craigslist recognizes as a subdomain (see sources.craigslist.site
@@ -28,21 +15,26 @@ search:
   lat: null
   lon: null
   radius_miles: 25
-  extra_keywords: []        # optional extra search terms, e.g. ["road bike", "hybrid"]
+  extra_keywords: []        # optional extra search terms appended to scraper queries
   exclude_keywords: []      # listings mentioning any of these are dropped entirely, regardless
-                              # of score -- e.g. ["mountain bike", "hardtail", "fatboy"] if your
-                              # bike shares a make with product lines that could never be it
+                              # of score -- e.g. specific model lines you know aren't what you want
 
 sources:
   craigslist:
     enabled: true
     site: ""                # subdomain, e.g. "sfbay", "losangeles", "seattle"
-    category: "bika"         # bika = bikes for sale by owner; use "bikd" for parts
+    category: "bia"          # bia = bicycles for sale
   ebay:
     enabled: false
     # App ID / Cert ID come from EBAY_APP_ID / EBAY_CERT_ID env vars, not here.
   facebook:
     enabled: false           # off by default -- see README before turning this on
+  upway:
+    enabled: false            # currently blocked -- see README, Upway's shopping API isn't working yet
+    domain: "upway.co"
+  pros_closet:
+    enabled: false            # currently blocked -- see README, same issue as Upway
+    domain: "theproscloset.com"
 
 alerts:
   email:

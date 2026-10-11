@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stolen Bike Finder</title>
+<title>E-Bike Finder</title>
 <style>
   :root {
     --bg: #f7f7f5;
@@ -138,7 +138,18 @@
   .source-craigslist { background: #7c3aed; }
   .source-ebay { background: #0064d2; }
   .source-facebook { background: #1877f2; }
+  .source-upway { background: #00a86b; }
+  .source-pros_closet { background: #d4572c; }
   .source-other { background: #6b6862; }
+  .delivery-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .delivery-badge.ships { color: var(--good); border-color: var(--good); background: var(--good-soft); }
   .reasons { font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 16px; }
   .listing-details { font-size: 0.78rem; color: var(--muted); }
   .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
@@ -151,8 +162,8 @@
 <div class="wrap">
   <header>
     <div>
-      <h1>Stolen Bike Finder</h1>
-      <div class="bike-list" id="bike-list">Loading bike details&hellip;</div>
+      <h1>E-Bike Finder</h1>
+      <div class="bike-list" id="wishlist-summary">Loading wishlist&hellip;</div>
       <div class="sources" id="sources"></div>
     </div>
     <button class="primary" id="refresh-btn">Refresh listings</button>
@@ -202,14 +213,14 @@
       <select id="status-filter">
         <option value="">All</option>
         <option value="new" selected>New</option>
-        <option value="reviewed">Reviewed</option>
-        <option value="false_positive">False positive</option>
-        <option value="contacted_police">Contacted police</option>
+        <option value="interested">Interested</option>
+        <option value="not_it">Not it</option>
+        <option value="purchased">Purchased</option>
       </select>
     </label>
-    <label>Bike
-      <select id="bike-filter">
-        <option value="">All bikes</option>
+    <label>Brand
+      <select id="brand-filter">
+        <option value="">All brands</option>
       </select>
     </label>
     <span id="result-count" style="color: var(--muted)"></span>
@@ -221,7 +232,7 @@
 
 <script>
 const API = {
-  bikes: '/api/bikes',
+  wishlist: '/api/wishlist',
   listings: '/api/listings',
   refresh: '/api/refresh',
   status: (id) => `/api/listings/${encodeURIComponent(id)}/status`,
@@ -230,26 +241,28 @@ const API = {
 let allListings = [];
 let _radiusTouchedByUser = false;
 
-async function loadBikes() {
-  const res = await fetch(API.bikes);
+async function loadWishlist() {
+  const res = await fetch(API.wishlist);
   const data = await res.json();
-  const bikes = data.bikes || [];
+  const brands = data.brands || [];
 
-  const listEl = document.getElementById('bike-list');
-  listEl.innerHTML = '';
-  if (!bikes.length) {
-    listEl.textContent = 'No bikes configured yet';
+  const summaryEl = document.getElementById('wishlist-summary');
+  summaryEl.innerHTML = '';
+  if (!brands.length) {
+    summaryEl.textContent = 'No brands configured yet';
   } else {
-    for (const b of bikes) {
-      const line = document.createElement('div');
-      const parts = [b.year, b.make, b.model].filter(Boolean).join(' ');
-      line.textContent = `${b.name}: ${parts || '(no make/model set)'}${b.color ? ' · ' + b.color : ''}`;
-      listEl.appendChild(line);
+    const line = document.createElement('div');
+    line.textContent = brands.join(' · ') + (data.require_class_3 ? ' · Class 3 only' : '');
+    summaryEl.appendChild(line);
+    if (data.max_price_usd) {
+      const priceLine = document.createElement('div');
+      priceLine.textContent = `Budget: up to $${data.max_price_usd}`;
+      summaryEl.appendChild(priceLine);
     }
     const radiusLine = document.createElement('div');
     radiusLine.className = 'radius-line';
     radiusLine.textContent = `Searching within ${data.radius_miles} mi`;
-    listEl.appendChild(radiusLine);
+    summaryEl.appendChild(radiusLine);
   }
 
   if (data.radius_miles != null && !_radiusTouchedByUser) {
@@ -259,16 +272,16 @@ async function loadBikes() {
     updateRadiusPresetActive();
   }
 
-  const bikeFilter = document.getElementById('bike-filter');
-  const currentValue = bikeFilter.value;
-  bikeFilter.innerHTML = '<option value="">All bikes</option>';
-  for (const b of bikes) {
+  const brandFilter = document.getElementById('brand-filter');
+  const currentValue = brandFilter.value;
+  brandFilter.innerHTML = '<option value="">All brands</option>';
+  for (const b of brands) {
     const opt = document.createElement('option');
-    opt.value = b.name;
-    opt.textContent = b.name;
-    bikeFilter.appendChild(opt);
+    opt.value = b;
+    opt.textContent = b;
+    brandFilter.appendChild(opt);
   }
-  bikeFilter.value = currentValue;
+  brandFilter.value = currentValue;
 
   const sourcesEl = document.getElementById('sources');
   sourcesEl.innerHTML = '';
@@ -319,7 +332,7 @@ async function loadListings() {
 
 function render() {
   const statusFilter = document.getElementById('status-filter').value;
-  const bikeFilter = document.getElementById('bike-filter').value;
+  const brandFilter = document.getElementById('brand-filter').value;
   const grid = document.getElementById('grid');
   const emptyState = document.getElementById('empty-state');
   grid.innerHTML = '';
@@ -327,7 +340,7 @@ function render() {
   const filtered = allListings.filter(
     (l) =>
       (!statusFilter || l.status === statusFilter) &&
-      (!bikeFilter || l.matched_bike === bikeFilter) &&
+      (!brandFilter || l.matched_brand === brandFilter) &&
       (minPriceFilter <= 0 || (l.price_usd != null && l.price_usd >= minPriceFilter))
   );
   document.getElementById('result-count').textContent = `${filtered.length} listing(s)`;
@@ -361,7 +374,7 @@ function renderCard(listing) {
   const scoreRow = document.createElement('div');
   scoreRow.className = 'score-row';
   const sourceBadge = document.createElement('span');
-  const knownSources = ['craigslist', 'ebay', 'facebook'];
+  const knownSources = ['craigslist', 'ebay', 'facebook', 'upway', 'pros_closet'];
   sourceBadge.className = 'source-badge ' + (knownSources.includes(listing.source) ? `source-${listing.source}` : 'source-other');
   sourceBadge.textContent = listing.source;
   scoreRow.appendChild(sourceBadge);
@@ -369,11 +382,17 @@ function renderCard(listing) {
   score.className = 'score';
   score.textContent = `score ${listing.score}`;
   scoreRow.appendChild(score);
-  if (listing.matched_bike) {
-    const bikeTag = document.createElement('span');
-    bikeTag.className = 'matched-bike';
-    bikeTag.textContent = listing.matched_bike;
-    scoreRow.appendChild(bikeTag);
+  if (listing.matched_brand) {
+    const brandTag = document.createElement('span');
+    brandTag.className = 'matched-bike';
+    brandTag.textContent = listing.matched_brand;
+    scoreRow.appendChild(brandTag);
+  }
+  if (listing.delivery_available != null) {
+    const deliveryTag = document.createElement('span');
+    deliveryTag.className = 'delivery-badge' + (listing.delivery_available ? ' ships' : '');
+    deliveryTag.textContent = listing.delivery_available ? 'Ships' : 'Local pickup only';
+    scoreRow.appendChild(deliveryTag);
   }
   body.appendChild(scoreRow);
 
@@ -397,7 +416,11 @@ function renderCard(listing) {
 
   const details = document.createElement('div');
   details.className = 'listing-details';
-  details.textContent = 'Posted ' + formatPostedDate(listing.posted_at);
+  const detailBits = ['Posted ' + formatPostedDate(listing.posted_at)];
+  if (listing.mileage_miles != null) {
+    detailBits.push(`${listing.mileage_miles} mi on it`);
+  }
+  details.textContent = detailBits.join(' · ');
   body.appendChild(details);
 
   if (listing.score_reasons && listing.score_reasons.length) {
@@ -414,9 +437,9 @@ function renderCard(listing) {
   const actions = document.createElement('div');
   actions.className = 'card-actions';
   const statuses = [
-    ['reviewed', 'Reviewed'],
-    ['false_positive', 'Not it'],
-    ['contacted_police', 'Reported'],
+    ['interested', 'Interested'],
+    ['not_it', 'Not it'],
+    ['purchased', 'Purchased'],
   ];
   for (const [value, label] of statuses) {
     const btn = document.createElement('button');
@@ -498,16 +521,16 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Refresh listings';
-    await Promise.all([loadBikes(), loadListings()]);
+    await Promise.all([loadWishlist(), loadListings()]);
   }
 });
 
 document.getElementById('min-score').addEventListener('change', loadListings);
 document.getElementById('sort-by').addEventListener('change', loadListings);
 document.getElementById('status-filter').addEventListener('change', render);
-document.getElementById('bike-filter').addEventListener('change', render);
+document.getElementById('brand-filter').addEventListener('change', render);
 
-loadBikes();
+loadWishlist();
 loadListings();
 </script>
 </body>

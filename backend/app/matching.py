@@ -1,42 +1,36 @@
-"""Scores a scraped listing against the description of your stolen bike.
+"""Scores a scraped listing against your e-bike wishlist (brand + Class 3 requirement).
 
 This is deliberately simple keyword/attribute matching, not ML -- it's meant to rank a
 few dozen listings a day for a human to eyeball, not to auto-decide anything. Never treat
-a high score as certainty; always visually verify before doing anything with a match.
+a high score as certainty; always visually verify before acting on a match.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
 from difflib import SequenceMatcher
 
-from .config import AppConfig, BikeInfo
+from .config import AppConfig
 from .geo import haversine_miles
 from .models import Listing
 
-_MAKE_WEIGHT = 3.0
-_MODEL_WEIGHT = 3.0
-_COLOR_WEIGHT = 2.0
-_FRAME_SIZE_WEIGHT = 1.0
-_FEATURE_WEIGHT = 1.5
-_EXTRA_KEYWORD_WEIGHT = 0.5
-_CHEAP_PRICE_WEIGHT = 1.5
-_CHEAP_PRICE_RATIO = 0.4  # priced under 40% of stated value looks suspicious
+_BRAND_WEIGHT = 3.0
+_KEYWORD_WEIGHT = 0.5
+
+_CLASS_3_PHRASES = ["class 3", "class iii", "28 mph", "28mph", "28 mi/h"]
+
+_SHIPS_PHRASES = ["can ship", "will ship", "can deliver", "nationwide shipping", "ships nationwide", "free shipping"]
+_PICKUP_ONLY_PHRASES = ["local pickup only", "pickup only", "no shipping", "cash only local", "local only"]
 
 
 def build_search_queries(config: AppConfig) -> list[str]:
-    """One query per bike -- just the make (falling back to model).
+    """One query per wishlist brand.
 
-    Craigslist (and most of these search boxes) AND-match every word in the query, so a
-    query combining make + model + extra keywords almost never matches anything real --
-    sellers don't type a bike's full name out. Cast a wide net with just the make and let
-    score_listing() do the actual narrowing across the results that come back.
+    Craigslist (and most of these search boxes) AND-match every word in a query, so
+    combining several terms almost never matches anything real -- sellers don't type a
+    bike's full name out. Cast a wide net on brand and let score_listing() do the actual
+    narrowing across the results that come back.
     """
-    queries = []
-    for bike in config.bikes:
-        query = (bike.make or bike.model).strip()
-        if query:
-            queries.append(query)
-    return queries
+    return [b.strip() for b in config.wishlist.brands if b.strip()]
 
 
 def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool:
@@ -57,67 +51,83 @@ def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool
     return False
 
 
-_SERIAL_WEIGHT = 10.0  # sellers almost never type serials, but if it's there, that's it
+def is_class_3_confirmed(text: str) -> bool:
+    """True if the listing text explicitly states a Class 3 / 28mph motor. We never infer
+    this from brand or model name alone -- the same model often ships in multiple speed
+    classes, so guessing risks silently hiding a real Class 3 listing or showing one that
+    isn't. If a listing doesn't say it, it doesn't pass require_class_3."""
+    text = text.lower()
+    return any(phrase in text for phrase in _CLASS_3_PHRASES)
 
 
-def _score_against_bike(listing: Listing, bike: BikeInfo, config: AppConfig) -> tuple[float, list[str]]:
+_MILEAGE_RE = re.compile(r"(\d[\d,]{0,5})\s*(?:miles?|mi\.?)\b", re.IGNORECASE)
+
+
+def extract_mileage(text: str) -> float | None:
+    """Best-effort odometer mileage from listing text, e.g. "only 496 miles" -> 496.0.
+    Returns the smallest number found if there are several (titles sometimes separately
+    mention a motor's max range in miles, which tends to be a larger, rounder number)."""
+    matches = _MILEAGE_RE.findall(text)
+    if not matches:
+        return None
+    values = [float(m.replace(",", "")) for m in matches]
+    return min(values)
+
+
+def infer_delivery(text: str) -> bool | None:
+    """Text-only heuristic for sources (Craigslist) that don't give us real shipping data.
+    None means "couldn't tell" -- most local-classifieds listings never mention it either
+    way, and that's not the same as confirmed local-pickup-only."""
+    text = text.lower()
+    if any(phrase in text for phrase in _SHIPS_PHRASES):
+        return True
+    if any(phrase in text for phrase in _PICKUP_ONLY_PHRASES):
+        return False
+    return None
+
+
+def _score_against_brand(listing: Listing, brand: str, config: AppConfig) -> tuple[float, list[str]]:
     text = f"{listing.title} {listing.description}".strip()
 
     score = 0.0
     reasons: list[str] = []
 
-    if bike.serial_number and _fuzzy_contains(text, bike.serial_number, threshold=0.95):
-        score += _SERIAL_WEIGHT
-        reasons.append(f"mentions serial number '{bike.serial_number}'")
+    if not _fuzzy_contains(text, brand):
+        return 0.0, []
 
-    if bike.make and _fuzzy_contains(text, bike.make):
-        score += _MAKE_WEIGHT
-        reasons.append(f"mentions make '{bike.make}'")
+    score += _BRAND_WEIGHT
+    reasons.append(f"mentions brand '{brand}'")
 
-    if bike.model and _fuzzy_contains(text, bike.model):
-        score += _MODEL_WEIGHT
-        reasons.append(f"mentions model '{bike.model}'")
-
-    if bike.color and _fuzzy_contains(text, bike.color):
-        score += _COLOR_WEIGHT
-        reasons.append(f"mentions color '{bike.color}'")
-
-    if bike.frame_size and _fuzzy_contains(text, bike.frame_size):
-        score += _FRAME_SIZE_WEIGHT
-        reasons.append(f"mentions frame size '{bike.frame_size}'")
-
-    for feature in bike.features:
-        if feature and _fuzzy_contains(text, feature):
-            score += _FEATURE_WEIGHT
-            reasons.append(f"mentions distinguishing feature '{feature}'")
-
-    for keyword in config.search.extra_keywords:
+    for keyword in config.wishlist.keywords:
         if keyword and _fuzzy_contains(text, keyword):
-            score += _EXTRA_KEYWORD_WEIGHT
+            score += _KEYWORD_WEIGHT
             reasons.append(f"mentions keyword '{keyword}'")
 
-    if bike.approx_value_usd and listing.price_usd:
-        if listing.price_usd <= bike.approx_value_usd * _CHEAP_PRICE_RATIO:
-            score += _CHEAP_PRICE_WEIGHT
-            reasons.append("priced suspiciously low for this bike's value")
+    if is_class_3_confirmed(text):
+        reasons.append("confirms Class 3 / 28mph motor")
 
     return round(score, 2), reasons
 
 
 def score_listing(listing: Listing, config: AppConfig) -> None:
-    """Scores against every configured bike and keeps the best match in place."""
+    """Scores against every wishlist brand and keeps the best match in place."""
     best_score = 0.0
     best_reasons: list[str] = []
-    best_bike: BikeInfo | None = None
+    best_brand: str | None = None
 
-    for bike in config.bikes:
-        score, reasons = _score_against_bike(listing, bike, config)
+    for brand in config.wishlist.brands:
+        score, reasons = _score_against_brand(listing, brand, config)
         if score > best_score:
-            best_score, best_reasons, best_bike = score, reasons, bike
+            best_score, best_reasons, best_brand = score, reasons, brand
 
     listing.score = best_score
     listing.score_reasons = best_reasons
-    listing.matched_bike = best_bike.name if best_bike else None
+    listing.matched_brand = best_brand
+
+    text = f"{listing.title} {listing.description}"
+    listing.mileage_miles = extract_mileage(text)
+    if listing.delivery_available is None:
+        listing.delivery_available = infer_delivery(text)
 
 
 def compute_distance(listing: Listing, config: AppConfig) -> None:
@@ -139,38 +149,23 @@ def is_excluded_text(text: str, exclude_keywords: list[str]) -> bool:
 
 
 def is_relevant(listing: Listing, config: AppConfig) -> bool:
-    """Hard filters: posted before the matched bike's theft, outside the search radius,
-    or matching one of search.exclude_keywords (e.g. "mountain bike", "fatboy" -- things
-    that share your bike's make but are never going to be the bike itself).
+    """Hard filters: excluded keywords, over budget, outside the search radius, or (when
+    wishlist.require_class_3 is set) no explicit Class 3 / 28mph confirmation in the text.
 
-    Call this after score_listing() has set listing.matched_bike.
+    Call this after score_listing() has set listing.matched_brand.
     """
     text = f"{listing.title} {listing.description}"
     if is_excluded_text(text, config.search.exclude_keywords):
         return False
 
-    bike = next((b for b in config.bikes if b.name == listing.matched_bike), None)
-    if bike and bike.stolen_date and listing.posted_at:
-        posted = _parse_date(listing.posted_at)
-        stolen = _parse_date(bike.stolen_date)
-        if posted and stolen and posted < stolen:
+    if config.wishlist.require_class_3 and not is_class_3_confirmed(text):
+        return False
+
+    if config.wishlist.max_price_usd and listing.price_usd is not None:
+        if listing.price_usd > config.wishlist.max_price_usd:
             return False
 
     if listing.distance_miles is not None and listing.distance_miles > config.search.radius_miles:
         return False
 
     return True
-
-
-def _parse_date(value: str) -> datetime | None:
-    for fmt in ("%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
-        try:
-            dt = datetime.strptime(value, fmt)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None

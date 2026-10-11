@@ -90,6 +90,13 @@ class EbayScraper:
             )
             image = item.get("image", {}).get("imageUrl")
 
+            # Real structured shipping data, unlike the text-guessing we have to do for
+            # Craigslist -- a non-empty shippingOptions means the seller offers shipping.
+            # Its absence from the summary isn't proof of pickup-only, so leave unknown
+            # rather than assume no shipping.
+            shipping_options = item.get("shippingOptions") or []
+            delivery_available = True if shipping_options else None
+
             yield Listing(
                 id=f"ebay:{item_id}",
                 source="ebay",
@@ -103,4 +110,5 @@ class EbayScraper:
                 lon=None,
                 posted_at=item.get("itemCreationDate"),
                 first_seen_at=now_iso(),
+                delivery_available=delivery_available,
             )
