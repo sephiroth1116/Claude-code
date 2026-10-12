@@ -16,6 +16,8 @@ from .matching import build_search_queries, compute_distance, is_excluded_text, 
 from .scrapers.craigslist import CraigslistScraper, fetch_listing_details
 from .scrapers.ebay import EbayScraper
 from .scrapers.facebook import FacebookScraper
+from .scrapers.pros_closet import ProsClosetScraper
+from .scrapers.upway import UpwayScraper
 
 _DETAILS_FETCH_CONCURRENCY = 6  # be polite to Craigslist's servers
 
@@ -78,6 +80,10 @@ async def run_refresh() -> dict:
                     config.facebook, config.search.lat, config.search.lon, config.search.radius_miles
                 )
             )
+        if config.upway.enabled:
+            scrapers.append(UpwayScraper(config.upway))
+        if config.pros_closet.enabled:
+            scrapers.append(ProsClosetScraper(config.pros_closet))
 
         loop = asyncio.get_event_loop()
         seen_ids: set[str] = set()

@@ -53,13 +53,17 @@ def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool
 
 
 def is_class_3_confirmed(text: str) -> bool:
-    """True if the listing text explicitly states a Class 3 / 28mph motor. We never infer
-    this from brand or model name alone -- the same model often ships in multiple speed
-    classes, so guessing risks being wrong in either direction. This is a soft signal
-    (scoring bonus + a visible badge), not a hard filter: live testing found that real
-    sellers essentially never write legal speed classification into casual listings, so
-    treating it as required returns close to nothing. Verify the actual class yourself
-    before buying regardless of what this says."""
+    """True if the listing text explicitly states a Class 3 / 28mph motor. This is the
+    text-heuristic fallback for sources without real structured data (Craigslist, eBay,
+    The Pro's Closet) -- Upway sets listing.class_3_confirmed directly from its own
+    maxSpeed:28mph product tag instead, which is authoritative and skips this guess
+    entirely. We never infer Class 3 from brand or model name alone -- the same model
+    often ships in multiple speed classes, so guessing risks being wrong in either
+    direction. This is always a soft signal (scoring bonus + a visible badge), not a hard
+    filter: live testing found that real Craigslist sellers essentially never write legal
+    speed classification into casual listings, so treating it as required returns close to
+    nothing there. Verify the actual class yourself before buying regardless of what this
+    says."""
     text = text.lower()
     return any(phrase in text for phrase in _CLASS_3_PHRASES)
 
@@ -107,7 +111,7 @@ def _score_against_brand(listing: Listing, brand: str, config: AppConfig) -> tup
             score += _KEYWORD_WEIGHT
             reasons.append(f"mentions keyword '{keyword}'")
 
-    if is_class_3_confirmed(text):
+    if listing.class_3_confirmed or is_class_3_confirmed(text):
         score += _CLASS_3_BONUS_WEIGHT
         reasons.append("confirms Class 3 / 28mph motor")
 
@@ -130,8 +134,11 @@ def score_listing(listing: Listing, config: AppConfig) -> None:
     listing.matched_brand = best_brand
 
     text = f"{listing.title} {listing.description}"
-    listing.mileage_miles = extract_mileage(text)
-    listing.class_3_confirmed = is_class_3_confirmed(text)
+    # Some sources (Upway's mileage metafield, its maxSpeed tag) already set these from
+    # real structured data before this runs -- never clobber that with a weaker text guess.
+    if listing.mileage_miles is None:
+        listing.mileage_miles = extract_mileage(text)
+    listing.class_3_confirmed = listing.class_3_confirmed or is_class_3_confirmed(text)
     if listing.delivery_available is None:
         listing.delivery_available = infer_delivery(text)
 

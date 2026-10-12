@@ -3,9 +3,11 @@
 
 wishlist:
   brands: []                 # OR-matched -- any one qualifies, e.g. ["Specialized", "Riese & Muller", "Gazelle"]
-  require_class_3: false     # if true, a listing must explicitly say "Class 3" / "28 mph" to count --
-                               # never inferred from brand/model alone, since the same model often ships
-                               # in multiple speed classes
+  require_class_3: false     # if true, an explicit Class 3 / 28mph confirmation adds a scoring bonus
+                               # and a "Class 3 confirmed" badge (never a hard filter -- most listings
+                               # never state it in text, and it's never inferred from brand/model alone,
+                               # since the same model often ships in multiple speed classes). Upway's
+                               # own listings confirm it from real product data, not a text guess.
   max_price_usd: null         # optional hard ceiling; listings priced above this are dropped entirely
   keywords: []                 # optional extra positive signals, e.g. ["ebike", "mid-drive"]
 
@@ -30,10 +32,10 @@ sources:
   facebook:
     enabled: false           # off by default -- see README before turning this on
   upway:
-    enabled: false            # currently blocked -- see README, Upway's shopping API isn't working yet
+    enabled: false            # used e-bike marketplace, queried via Shopify's public Storefront API
     domain: "upway.co"
   pros_closet:
-    enabled: false            # currently blocked -- see README, same issue as Upway
+    enabled: false            # used bike marketplace, queried via Shopify's public predictive search
     domain: "theproscloset.com"
 
 alerts:

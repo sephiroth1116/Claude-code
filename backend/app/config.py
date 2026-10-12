@@ -52,13 +52,15 @@ class FacebookConfig:
 
 
 @dataclass
-class UcpStoreConfig:
-    """A Shopify store reachable via the UCP/MCP shopping protocol (see scrapers/ucp.py).
-    Upway and The Pro's Closet both run on this; any other Shopify-based bike shop with a
-    reachable /.well-known/ucp endpoint can be added the same way."""
+class StoreConfig:
+    """A Shopify-based bike store, queried directly via Shopify's public storefront JSON
+    APIs (see scrapers/upway.py, scrapers/pros_closet.py) -- not the UCP/MCP "agentic
+    commerce" protocol, which turned out to be broken on Shopify's end as of this writing.
+    `domain` is kept for config-file clarity but the scrapers currently hardcode their own
+    shop endpoints, since each one needed a different public API shape."""
 
     enabled: bool = False
-    domain: str = ""  # e.g. "upway.co" -- scraper resolves the real MCP endpoint from here
+    domain: str = ""  # e.g. "upway.co"
 
 
 @dataclass
@@ -74,8 +76,8 @@ class AppConfig:
     craigslist: CraigslistConfig
     ebay: EbayConfig
     facebook: FacebookConfig
-    upway: UcpStoreConfig
-    pros_closet: UcpStoreConfig
+    upway: StoreConfig
+    pros_closet: StoreConfig
     email_alert: EmailAlertConfig
     refresh_interval_minutes: int = 30
 
@@ -121,9 +123,9 @@ def load_config() -> AppConfig:
         **{k: v for k, v in sources_raw.get("facebook", {}).items() if k == "enabled"}
     )
     upway_raw = sources_raw.get("upway", {})
-    upway = UcpStoreConfig(enabled=upway_raw.get("enabled", False), domain=upway_raw.get("domain", "upway.co"))
+    upway = StoreConfig(enabled=upway_raw.get("enabled", False), domain=upway_raw.get("domain", "upway.co"))
     pros_closet_raw = sources_raw.get("pros_closet", {})
-    pros_closet = UcpStoreConfig(
+    pros_closet = StoreConfig(
         enabled=pros_closet_raw.get("enabled", False),
         domain=pros_closet_raw.get("domain", "theproscloset.com"),
     )

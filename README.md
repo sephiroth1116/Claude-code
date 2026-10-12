@@ -1,9 +1,10 @@
 # E-Bike Finder
 
-Pulls new e-bike listings from Craigslist and eBay within a radius of your location,
-scores each one against a brand wishlist (with a Class 3 / 28mph confirmation as a
-scoring bonus and a visible badge, not a hard requirement -- see why below), and shows
-the results in a local web dashboard so you can review them.
+Pulls new e-bike listings from Craigslist, eBay, Upway, and The Pro's Closet (Craigslist
+within a radius of your location; the rest ship nationwide), scores each one against a
+brand wishlist (with a Class 3 / 28mph confirmation as a scoring bonus and a visible
+badge, not a hard requirement -- see why below), and shows the results in a local web
+dashboard so you can review them.
 
 This started as a tool to find a specific stolen bike; it's since been repurposed into a
 general e-bike shopping-wishlist tracker. The underlying mechanism — multi-site Craigslist
@@ -42,18 +43,31 @@ brand list instead of one bike's exact description.
   your own account this way is against Facebook's Terms of Service, and the scraper will
   break whenever Facebook changes their page layout. Read `backend/app/scrapers/facebook.py`
   before turning it on; that's your decision to make about your own account.
-- **Upway and The Pro's Closet — currently blocked, not yet working.** Both are
-  Shopify-based used/refurbished bike marketplaces that publish a real, sanctioned
-  catalog-search API for AI agents (Shopify's new UCP/MCP "agentic commerce" protocol,
-  not scraping). I got authentication working end-to-end — the handshake succeeds, and
-  `tools/list` correctly shows a `search_catalog` tool — but every attempt to actually
-  *call* that tool fails with `"Tool not found: search_catalog"`, including exact
-  spec-compliant requests and multiple payload variations. This looks like a bug in
-  Shopify's very recent (August 2026) rollout of the protocol rather than something
-  wrong on this end. The config toggles (`sources.upway`, `sources.pros_closet`) and the
-  hosted agent profile document (`ucp-agent-profile.json`, published via jsdelivr's
-  GitHub proxy so it has the `Cache-Control: public` header the spec requires) are
-  already in place for whenever this gets fixed or a missing piece gets found.
+- **Upway** — a used/refurbished e-bike marketplace built on Shopify Hydrogen (a
+  "headless" storefront). Its search results are fetched client-side from Shopify's
+  public Storefront GraphQL API using a token that's embedded in every page's own source
+  for exactly that purpose; `backend/app/scrapers/upway.py` calls that same API directly
+  over plain HTTPS instead of running a browser. No login, no scraping, no automation.
+  This is a better source than it might sound: Upway tags each listing with its own
+  `maxSpeed:20mph` / `maxSpeed:28mph` value and an exact `mileage` metafield, so Class 3
+  confirmation and miles ridden come from Upway's own structured data here, not a text
+  guess (see "How matching works"). Upway ships nationwide, so delivery is always on and
+  distance doesn't apply.
+
+  (An earlier attempt used Shopify's newer UCP/MCP "agentic commerce" protocol instead —
+  authentication worked, but its `tools/call` endpoint returned `"Tool not found"` for
+  every request tried, on both Upway and The Pro's Closet, which looked like a bug on
+  Shopify's side rather than something fixable here. That approach was abandoned in favor
+  of the Storefront API above, which is simpler and just works.)
+- **The Pro's Closet** — a used-bike marketplace on a standard (non-headless) Shopify
+  theme, so it has no Storefront API token to call directly. Instead,
+  `backend/app/scrapers/pros_closet.py` uses Shopify's public predictive-search endpoint
+  (`/search/suggest.json`) — the same AJAX call the site's own search box makes — which
+  takes a real text query and returns matching products directly. The one real limitation:
+  Shopify caps that endpoint at 10 results per query regardless of what's requested, so
+  this source only ever shows the 10 most relevant hits per wishlist brand. The Pro's
+  Closet doesn't expose an exact-mileage or max-speed field the way Upway does, so those
+  fall back to the same text-guessing used for Craigslist.
 
 ## Setup
 
@@ -113,6 +127,11 @@ brand list instead of one bike's exact description.
    session is saved to `.fb_browser_profile/` (gitignored) and reused after that. Then
    set `sources.facebook.enabled: true` in `config.yaml`.
 
+6. **Upway and The Pro's Closet**: no setup needed, no API key to request — both are
+   public endpoints each site's own search already uses. Just set
+   `sources.upway.enabled: true` and/or `sources.pros_closet.enabled: true` in
+   `config.yaml`.
+
 ## Running
 
 ```
@@ -169,23 +188,28 @@ doing the actual narrowing with the scoring above works far better in practice.
 
 ## Limitations, honestly
 
-- **Class 3 confirmation is a soft signal, not a filter, because Craigslist sellers
-  essentially never state it.** This was verified live, not assumed: checking 15 real
+- **Class 3 confirmation is a soft signal, not a filter, because most sources never
+  state it as text.** This was verified live, not assumed: checking 15 real Craigslist
   listings' full descriptions (not just titles), including an actual Specialized electric
   bike, **zero** mentioned "Class 3" or "28mph" anywhere. An earlier version of this tool
   treated `require_class_3` as a hard filter and that returned zero results in practice —
   it's now a scoring bonus plus a "Class 3 confirmed" / "Class 3 not stated" badge instead,
   so you still see every brand match and can eyeball the listing yourself to judge the
-  actual motor class. Inferring it from brand or model name instead was considered and
-  rejected — e.g. Specialized's Vado line ships switchable between speed classes, so
-  guessing risks being outright wrong.
-- This only sees what's publicly listed and currently supports Craigslist, eBay, and
-  (manually, riskily) Facebook. Upway and The Pro's Closet are built but blocked on a
-  Shopify-side protocol bug (see above).
+  actual motor class. Upway is the one exception: its own `maxSpeed` product data is
+  authoritative, so Upway listings get a real yes/no instead of a text guess. Inferring it
+  from brand or model name was considered and rejected for every source — e.g.
+  Specialized's Vado line ships switchable between speed classes, so guessing risks being
+  outright wrong.
+- This only sees what's publicly listed, across Craigslist, eBay, Upway, The Pro's
+  Closet, and (manually, riskily) Facebook.
+- The Pro's Closet's predictive-search endpoint is capped at 10 results per query by
+  Shopify itself, not by this code -- if it carries more than 10 matching listings for a
+  wishlist brand at once, only the top 10 show up here.
 - Scoring is keyword matching against text, not image recognition. A generic listing
   with no detail will score low even if it's a real match, unless the seller happened to
   mention something the scorer looks for.
-- Delivery/shipping status is real structured data from eBay's API when available, but a
+- Delivery/shipping status is real structured data from eBay's API, and always "ships"
+  for Upway/The Pro's Closet (both are online marketplaces, not local pickup), but a
   best-effort text guess for Craigslist (looks for phrases like "can ship" / "local
   pickup only"); most Craigslist listings mention neither, in which case it's shown as
   unknown rather than guessed.
