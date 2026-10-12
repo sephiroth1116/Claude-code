@@ -1,9 +1,9 @@
 # E-Bike Finder
 
 Pulls new e-bike listings from Craigslist and eBay within a radius of your location,
-scores each one against a brand wishlist (with an optional hard requirement that the
-listing explicitly confirm a Class 3 / 28mph motor), and shows the results in a local
-web dashboard so you can review them.
+scores each one against a brand wishlist (with a Class 3 / 28mph confirmation as a
+scoring bonus and a visible badge, not a hard requirement -- see why below), and shows
+the results in a local web dashboard so you can review them.
 
 This started as a tool to find a specific stolen bike; it's since been repurposed into a
 general e-bike shopping-wishlist tracker. The underlying mechanism — multi-site Craigslist
@@ -71,11 +71,14 @@ brand list instead of one bike's exact description.
    Edit `config.yaml`'s `wishlist:` section:
    - `brands` — a list, OR-matched (any one qualifies), e.g.
      `["Specialized", "Riese & Muller", "Gazelle"]`
-   - `require_class_3` — if `true`, a listing must explicitly state Class 3 / 28mph
-     somewhere in its text to count at all. This is deliberately never inferred from
-     brand or model name — the same model (e.g. Specialized's Vado line) often ships
-     switchable between speed classes, so guessing risks being wrong either direction.
-     In practice this means strict: see the Limitations section before turning it on.
+   - `require_class_3` — if `true`, you care about Class 3 / 28mph: listings that
+     explicitly state it in their text get a scoring bonus and a "Class 3 confirmed"
+     badge; everything else is tagged "Class 3 not stated" rather than hidden. This is
+     deliberately a soft signal, not a hard filter, and never inferred from brand or
+     model name (the same model, e.g. Specialized's Vado line, often ships switchable
+     between speed classes) -- live testing found real sellers essentially never write
+     legal speed classification into casual listings, so requiring it outright returned
+     close to zero results. See Limitations for the details.
    - `max_price_usd` — optional hard ceiling; anything priced above it is dropped.
    - `keywords` — optional extra positive signals, e.g. `["ebike", "mid-drive"]`.
 
@@ -148,10 +151,10 @@ to gauge how far away something is, not precise to the block.
 
 Simple, transparent keyword scoring (`backend/app/matching.py`) — no ML, nothing hidden:
 a listing scores against every wishlist brand and keeps whichever one matched best.
-Mentioning the brand is worth the most; extra `wishlist.keywords` add a smaller bonus.
-Listings outside your radius, over `max_price_usd`, or (when `require_class_3` is on)
-without an explicit Class 3 / 28mph confirmation are filtered out entirely, not just
-scored lower.
+Mentioning the brand is worth the most; extra `wishlist.keywords` add a smaller bonus;
+an explicit Class 3 / 28mph confirmation adds another bonus and sets the
+"Class 3 confirmed" badge (see `require_class_3` above for why this is a bonus, not a
+filter). Listings outside your radius or over `max_price_usd` are filtered out entirely.
 
 `search.exclude_keywords` is a hard filter too, checked before anything else: any listing
 mentioning one of those terms is dropped outright regardless of score. Useful when a
@@ -166,15 +169,16 @@ doing the actual narrowing with the scoring above works far better in practice.
 
 ## Limitations, honestly
 
-- **`require_class_3` is strict almost to the point of uselessness on Craigslist**, and
-  this was verified live, not assumed: checking 15 real listings' full descriptions
-  (not just titles), including an actual Specialized electric bike, **zero** mentioned
-  "Class 3" or "28mph" anywhere. Private sellers just don't write legal speed
-  classification into casual listings. With this on, expect very few or zero Craigslist
-  results; eBay or a future source with real spec sheets may do meaningfully better.
-  This was a deliberate choice, not a bug — the alternative (inferring class from brand
-  or model name) risks being outright wrong, since e.g. Specialized's Vado line ships
-  switchable between speed classes.
+- **Class 3 confirmation is a soft signal, not a filter, because Craigslist sellers
+  essentially never state it.** This was verified live, not assumed: checking 15 real
+  listings' full descriptions (not just titles), including an actual Specialized electric
+  bike, **zero** mentioned "Class 3" or "28mph" anywhere. An earlier version of this tool
+  treated `require_class_3` as a hard filter and that returned zero results in practice —
+  it's now a scoring bonus plus a "Class 3 confirmed" / "Class 3 not stated" badge instead,
+  so you still see every brand match and can eyeball the listing yourself to judge the
+  actual motor class. Inferring it from brand or model name instead was considered and
+  rejected — e.g. Specialized's Vado line ships switchable between speed classes, so
+  guessing risks being outright wrong.
 - This only sees what's publicly listed and currently supports Craigslist, eBay, and
   (manually, riskily) Facebook. Upway and The Pro's Closet are built but blocked on a
   Shopify-side protocol bug (see above).

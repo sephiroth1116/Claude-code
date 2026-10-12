@@ -25,6 +25,8 @@ class Listing:
     matched_brand: str | None = None  # which wishlist brand this listing matched
     delivery_available: bool | None = None  # None = unknown; ships vs local-pickup-only
     mileage_miles: float | None = None  # odometer miles on the bike, when the listing states it
+    class_3_confirmed: bool = False  # listing text explicitly states Class 3 / 28mph -- a
+                                       # soft signal (scoring bonus + badge), never a hard filter
     status: str = "new"  # "new" | "interested" | "not_it" | "purchased"
 
     def to_dict(self) -> dict:

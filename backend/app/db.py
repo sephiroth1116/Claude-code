@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS listings (
     matched_brand TEXT,
     delivery_available INTEGER,
     mileage_miles REAL,
+    class_3_confirmed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'new'
 );
 """
@@ -61,7 +62,7 @@ def upsert_listing(listing: Listing) -> bool:
         if existing:
             conn.execute(
                 """UPDATE listings SET score = ?, score_reasons = ?, distance_miles = ?, matched_brand = ?,
-                   delivery_available = ?, mileage_miles = ?
+                   delivery_available = ?, mileage_miles = ?, class_3_confirmed = ?
                    WHERE id = ?""",
                 (
                     listing.score,
@@ -70,6 +71,7 @@ def upsert_listing(listing: Listing) -> bool:
                     listing.matched_brand,
                     listing.delivery_available,
                     listing.mileage_miles,
+                    listing.class_3_confirmed,
                     listing.id,
                 ),
             )
@@ -80,8 +82,8 @@ def upsert_listing(listing: Listing) -> bool:
             """INSERT INTO listings (
                 id, source, title, description, price_usd, url, image_url, location_text,
                 lat, lon, posted_at, first_seen_at, distance_miles, score, score_reasons,
-                matched_brand, delivery_available, mileage_miles, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                matched_brand, delivery_available, mileage_miles, class_3_confirmed, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 listing.id,
                 listing.source,
@@ -101,6 +103,7 @@ def upsert_listing(listing: Listing) -> bool:
                 listing.matched_brand,
                 listing.delivery_available,
                 listing.mileage_miles,
+                listing.class_3_confirmed,
                 listing.status,
             ),
         )

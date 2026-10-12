@@ -1,4 +1,4 @@
-"""Scores a scraped listing against your e-bike wishlist (brand + Class 3 requirement).
+"""Scores a scraped listing against your e-bike wishlist (brand + Class 3 soft signal).
 
 This is deliberately simple keyword/attribute matching, not ML -- it's meant to rank a
 few dozen listings a day for a human to eyeball, not to auto-decide anything. Never treat
@@ -15,6 +15,7 @@ from .models import Listing
 
 _BRAND_WEIGHT = 3.0
 _KEYWORD_WEIGHT = 0.5
+_CLASS_3_BONUS_WEIGHT = 2.0
 
 _CLASS_3_PHRASES = ["class 3", "class iii", "28 mph", "28mph", "28 mi/h"]
 
@@ -54,8 +55,11 @@ def _fuzzy_contains(haystack: str, needle: str, threshold: float = 0.82) -> bool
 def is_class_3_confirmed(text: str) -> bool:
     """True if the listing text explicitly states a Class 3 / 28mph motor. We never infer
     this from brand or model name alone -- the same model often ships in multiple speed
-    classes, so guessing risks silently hiding a real Class 3 listing or showing one that
-    isn't. If a listing doesn't say it, it doesn't pass require_class_3."""
+    classes, so guessing risks being wrong in either direction. This is a soft signal
+    (scoring bonus + a visible badge), not a hard filter: live testing found that real
+    sellers essentially never write legal speed classification into casual listings, so
+    treating it as required returns close to nothing. Verify the actual class yourself
+    before buying regardless of what this says."""
     text = text.lower()
     return any(phrase in text for phrase in _CLASS_3_PHRASES)
 
@@ -104,6 +108,7 @@ def _score_against_brand(listing: Listing, brand: str, config: AppConfig) -> tup
             reasons.append(f"mentions keyword '{keyword}'")
 
     if is_class_3_confirmed(text):
+        score += _CLASS_3_BONUS_WEIGHT
         reasons.append("confirms Class 3 / 28mph motor")
 
     return round(score, 2), reasons
@@ -126,6 +131,7 @@ def score_listing(listing: Listing, config: AppConfig) -> None:
 
     text = f"{listing.title} {listing.description}"
     listing.mileage_miles = extract_mileage(text)
+    listing.class_3_confirmed = is_class_3_confirmed(text)
     if listing.delivery_available is None:
         listing.delivery_available = infer_delivery(text)
 
@@ -149,16 +155,17 @@ def is_excluded_text(text: str, exclude_keywords: list[str]) -> bool:
 
 
 def is_relevant(listing: Listing, config: AppConfig) -> bool:
-    """Hard filters: excluded keywords, over budget, outside the search radius, or (when
-    wishlist.require_class_3 is set) no explicit Class 3 / 28mph confirmation in the text.
+    """Hard filters: excluded keywords, over budget, outside the search radius.
+
+    Class 3 confirmation is intentionally NOT a hard filter here even when
+    wishlist.require_class_3 is set -- it's a soft signal instead (scoring bonus +
+    listing.class_3_confirmed badge), because real sellers essentially never write legal
+    speed classification into casual listings; requiring it returns close to nothing.
 
     Call this after score_listing() has set listing.matched_brand.
     """
     text = f"{listing.title} {listing.description}"
     if is_excluded_text(text, config.search.exclude_keywords):
-        return False
-
-    if config.wishlist.require_class_3 and not is_class_3_confirmed(text):
         return False
 
     if config.wishlist.max_price_usd and listing.price_usd is not None:

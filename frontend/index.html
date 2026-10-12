@@ -150,6 +150,15 @@
     color: var(--muted);
   }
   .delivery-badge.ships { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .class3-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .class3-badge.confirmed { color: var(--good); border-color: var(--good); background: var(--good-soft); }
   .reasons { font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 16px; }
   .listing-details { font-size: 0.78rem; color: var(--muted); }
   .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
@@ -203,9 +212,9 @@
     </label>
     <label>Min score
       <select id="min-score">
-        <option value="0">Any</option>
+        <option value="0" selected>Any</option>
         <option value="2">2+</option>
-        <option value="4" selected>4+</option>
+        <option value="4">4+</option>
         <option value="6">6+</option>
       </select>
     </label>
@@ -252,7 +261,7 @@ async function loadWishlist() {
     summaryEl.textContent = 'No brands configured yet';
   } else {
     const line = document.createElement('div');
-    line.textContent = brands.join(' · ') + (data.require_class_3 ? ' · Class 3 only' : '');
+    line.textContent = brands.join(' · ') + (data.require_class_3 ? ' · Class 3 preferred' : '');
     summaryEl.appendChild(line);
     if (data.max_price_usd) {
       const priceLine = document.createElement('div');
@@ -388,6 +397,10 @@ function renderCard(listing) {
     brandTag.textContent = listing.matched_brand;
     scoreRow.appendChild(brandTag);
   }
+  const class3Tag = document.createElement('span');
+  class3Tag.className = 'class3-badge' + (listing.class_3_confirmed ? ' confirmed' : '');
+  class3Tag.textContent = listing.class_3_confirmed ? 'Class 3 confirmed' : 'Class 3 not stated';
+  scoreRow.appendChild(class3Tag);
   if (listing.delivery_available != null) {
     const deliveryTag = document.createElement('span');
     deliveryTag.className = 'delivery-badge' + (listing.delivery_available ? ' ships' : '');
